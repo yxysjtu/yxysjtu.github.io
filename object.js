@@ -15,6 +15,28 @@ function create_shape(shape, text, x, y, width, height){
                                                                                                                             x+width/2-height/2,y-height/2,
                                                                                                                             x-width/2+height/2,y-height/2);
         new_shape.setAttributeNS(null, "d", path);
+    }else if(shape == "parallelogram"){
+        new_shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        var path = "M {0} {1} L {2} {3} L {4} {5} L {6} {7} L {8} {9} L {10} {11}".format(x-width/2+height/2,y-height/2,
+                                                                                            x+width/2,y-height/2,
+                                                                                            x+width/2-height/2,y+height/2,
+                                                                                            x-width/2,y+height/2,
+                                                                                            x-width/2+height/2,y-height/2);
+        new_shape.setAttributeNS(null, "d", path);
+    }else if(shape == "rectangle"){
+        new_shape = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        new_shape.setAttributeNS(null, "x", x - width / 2);
+        new_shape.setAttributeNS(null, "y", y - height / 2);
+        new_shape.setAttributeNS(null, "width", width);
+        new_shape.setAttributeNS(null, "height", height);
+    }else if(shape == "diamond"){
+        new_shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        var path = "M {0} {1} L {2} {3} L {4} {5} L {6} {7} L {8} {9} L {10} {11}".format(x,y-height/2,
+                                                                                            x+width/2,y,
+                                                                                            x,y+height/2,
+                                                                                            x-width/2,y,
+                                                                                            x,y-height/2);
+        new_shape.setAttributeNS(null, "d", path);
     }
     new_shape.setAttributeNS(null, "class", "object");
     var new_text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -77,16 +99,27 @@ class Node{
         }
     }
 
-    move(x, y){
+    setPos(x, y){
         var transforms = this.g.transform.baseVal;
 
         // Get initial translation
         var transform = transforms.getItem(0);
-        //dx += transform.matrix.e;
-        //dy += transform.matrix.f;
         this.x = x;
         this.y = y;
+        
         transform.setTranslate(x, y);
+    }
+    move(dx, dy){
+        var transforms = this.g.transform.baseVal;
+
+        // Get initial translation
+        var transform = transforms.getItem(0);
+        this.x += dx;
+        this.y += dy;
+        dx += transform.matrix.e;
+        dy += transform.matrix.f;
+        
+        transform.setTranslate(dx, dy);
     }
 
     delete(){

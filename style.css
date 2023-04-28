@@ -5,17 +5,15 @@ body{
 .grid-container {
     display: grid;
     grid-template-rows: auto auto;
-    grid-template-columns: 200px auto 200px;
+    grid-template-columns: auto;
 
     width: 100%;
-    height: 101vh;
+    height: 100vh;
     
+    overflow: hidden;
 }
 
 .icon-bar {
-    grid-column-start: 1;
-    grid-column-end: 4;
-
     width: 100%; /* Full-width */
     height: 35px;
     background-color: #ffffff; 
@@ -41,10 +39,14 @@ body{
 }
 
 .tab-bar{
+    position:absolute;
+    top: 40px;;
+    left:0;
     display: grid;
     grid-template-rows: auto;
     grid-template-columns: auto auto;
     border: 4px solid #eee;
+    width: 200px;
     height: 100%;
 }
 /* Style the tab */
@@ -133,14 +135,15 @@ ul, #myUL {
   }
 
 .item{
-    background-color: white;
     margin: 18px;
-    width:80%;
-    padding-bottom: 40%;
-
 }
 
 .attr-bar{
+    position:absolute;
+    top: 40px;
+    right:0;
+    width: 200px;
+    height: 100%;
     border: 4px solid #eee;
     background-color: #eee;
 }
@@ -159,8 +162,6 @@ ul, #myUL {
 }
 
 .fullscreen{
-    position:relative;
-
     height:100%;
     width:100%;
 }

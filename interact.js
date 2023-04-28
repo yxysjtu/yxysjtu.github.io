@@ -9,11 +9,12 @@ String.prototype.format = function(){
 };
 
 var svg;
-var pressedBtn = -1;
+var pressedBtn = -1, followFlag = false;
 var viewBox = {x:0, y:0, width:200, height:100};
 var fontsize = 6, color = "#007bff", fill = true;
-var selectedObjects = [], selectedObject = null, selectFinish = false;
+var selectedObjects = [], selectedObject = null;
 var svg_rect_prev, svg_rect;
+var item_list = [];
 
 window.onload = function(){
     //去掉默认的contextmenu事件，否则会和右键事件同时出现。
@@ -77,9 +78,36 @@ function makeDraggable(evt) {
     svg.addEventListener('touchleave', mouseup);
     svg.addEventListener('touchcancel', mouseup);
 
-    var selectedElement, offset, transform;
+    var selectedElement, offset;
 
-    var test = new Node("oval", true);
+    //add shape
+    function create_item(shape){
+        new_svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        new_svg.setAttributeNS(null, "viewBox", "-2 -2 36 20");
+        new_g = create_shape(shape, "text", 16, 8, 32, 16);
+        new_g.onclick = function(){
+            var float_shape = new Node(shape);
+            selectedObject = float_shape;
+            for(var obj of selectedObjects){
+                obj.leave();
+            }
+            selectedObjects = [float_shape];
+            followFlag = true;
+        };
+        new_svg.appendChild(new_g);
+        new_div = document.createElement("div");
+        new_div.setAttributeNS(null, "class", "item");
+        new_div.appendChild(new_svg);
+        item_list.push(new_g);
+        return new_div;
+    }
+    
+    object_bar = document.getElementById("object");
+    object_bar.appendChild(create_item("oval"));
+    object_bar.appendChild(create_item("parallelogram"));
+    object_bar.appendChild(create_item("rectangle"));
+    object_bar.appendChild(create_item("diamond"));
+
 
     svg_rect_prev = svg.getBoundingClientRect();
     viewBox.height = viewBox.width / svg_rect_prev.width * svg_rect_prev.height;
@@ -128,7 +156,7 @@ function makeDraggable(evt) {
                 selectedObject.hover();
             }
         }else{
-            if(selectedObject != null && !selectedObjects.includes(selectedObject)){
+            if(selectedObject != null && pressedBtn != 0 && !selectedObjects.includes(selectedObject)){
                 selectedObject.leave();
             }
             selectedObject = null;
@@ -142,20 +170,21 @@ function makeDraggable(evt) {
         offset = getMousePosition(evt);
 
         if(pressedBtn == 0){
-            if(selectedObject != null){//一种是鼠标按下对象，拖拽，弹起
-                selectedObjects.push(selectedObject);
-                selectFinish = true;
-                //console.log(selectedObjects);
-            }else{//一种是鼠标按下画布，拖拽选框，弹起，再按下，得是对象，整体拖拽，弹起
-                if(selectFinish){ //deselect
-                    selectFinish = false;
+            if(selectedObject != null){//一种是鼠标按下对象，拖拽，弹起       
+                if(!selectedObjects.includes(selectedObject)){
                     for(var obj of selectedObjects){
                         obj.leave();
                     }
-                    selectedObjects = [];
-                }else{
-
+                    selectedObjects = [selectedObject];
                 }
+                followFlag = true;
+                //console.log(selectedObjects);
+            }else{//一种是鼠标按下画布，拖拽选框，弹起，再按下，得是对象，整体拖拽，弹起
+                for(var obj of selectedObjects){
+                    obj.leave();
+                }
+                selectedObjects = [];
+                followFlag = false;
             }
         }
 
@@ -174,18 +203,22 @@ function makeDraggable(evt) {
             var geometry = viewBox.x+" "+viewBox.y+" "+viewBox.width+" "+viewBox.height;
             svg.setAttributeNS(null, "viewBox", geometry);
         }
-        else if (pressedBtn == 0) {
-            if(selectFinish){
+        else if (followFlag) {
+            var dx = coord.x - offset.x;
+            var dy = coord.y - offset.y;
+            if(selectedObjects.length == 1){
+                selectedObjects[0].setPos(coord.x, coord.y);
+            }else{
                 for(var obj of selectedObjects){
-                    obj.move(coord.x, coord.y);
+                    obj.move(dx, dy);
+                    offset = coord;
                 }
             }
-
         }
     }
 
     function mouseup(evt) { //dehighlight
         pressedBtn = -1;
-        selectFinish = true;
+        followFlag = false;
     }
 }
