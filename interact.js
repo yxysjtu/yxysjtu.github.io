@@ -8,9 +8,10 @@ String.prototype.format = function(){
     return s;
 };
 
-var svg;
+var svg, textbox;
 var pressedBtn = -1, followFlag = false;
-var viewBox = {x:0, y:0, width:200, height:100};
+var last_press_t = 0;
+var viewBox = {x:0, y:0, width:400, height:100};
 var fontsize = 6, color = "#007bff", fill = true;
 var selectedObjects = [], selectedObject = null;
 var svg_rect_prev, svg_rect;
@@ -65,6 +66,7 @@ function open_tab(evt, tabName) {
 
 function makeDraggable(evt) {
     svg = evt.target;
+    textbox = document.getElementsByClassName("textbox")[0];
 
     svg.addEventListener('mouseover', mouseover);
     svg.addEventListener('wheel', mousescroll);
@@ -85,7 +87,7 @@ function makeDraggable(evt) {
         new_svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         new_svg.setAttributeNS(null, "viewBox", "-2 -2 36 20");
         new_g = create_shape(shape, "text", 16, 8, 32, 16);
-        new_g.onclick = function(){
+        new_g.onclick = function(evt){
             var float_shape = new Node(shape);
             selectedObject = float_shape;
             for(var obj of selectedObjects){
@@ -93,6 +95,8 @@ function makeDraggable(evt) {
             }
             selectedObjects = [float_shape];
             followFlag = true;
+            offset = getMousePosition(evt);
+            float_shape.setPos(offset.x, offset.y);
         };
         new_svg.appendChild(new_g);
         new_div = document.createElement("div");
@@ -170,16 +174,34 @@ function makeDraggable(evt) {
         offset = getMousePosition(evt);
 
         if(pressedBtn == 0){
+            //console.log(Date.now());
             if(selectedObject != null){//一种是鼠标按下对象，拖拽，弹起       
                 if(!selectedObjects.includes(selectedObject)){
                     for(var obj of selectedObjects){
                         obj.leave();
                     }
                     selectedObjects = [selectedObject];
+                }else if(selectedObjects.length == 1){
+                    if(Date.now() - last_press_t < 500){ //double click
+                        //console.log(textbox);
+                        textbox.style.left = evt.clientX + "px";
+                        textbox.style.top = evt.clientY + "px";
+                        textbox.style.display = "block";
+                        textbox.value = selectedObject.text.innerHTML;
+
+                    }       
                 }
                 followFlag = true;
+                last_press_t = Date.now();
                 //console.log(selectedObjects);
             }else{//一种是鼠标按下画布，拖拽选框，弹起，再按下，得是对象，整体拖拽，弹起
+                //hide textbox, update attributes
+                if(textbox.style.display == "block"){
+                    textbox.style.display = "none";
+                    selectedObjects[0].text.innerHTML = textbox.value;
+                    //TODO 更新其他参数，比如图形大小，字号，颜色，填充（注意更新的时候edge自动跟随）
+                    
+                }
                 for(var obj of selectedObjects){
                     obj.leave();
                 }

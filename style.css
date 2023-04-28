@@ -165,3 +165,16 @@ ul, #myUL {
     height:100%;
     width:100%;
 }
+
+.textbox{
+    display: none;
+    position: absolute;
+    top:300px;
+    left:300px;
+    width:200px;
+    height: 100px;
+
+    overflow-y: scroll;
+    font-size: 16px;
+    border: 2px solid #ccc;
+}

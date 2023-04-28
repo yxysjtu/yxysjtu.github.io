@@ -17,7 +17,7 @@ function create_shape(shape, text, x, y, width, height){
         new_shape.setAttributeNS(null, "d", path);
     }else if(shape == "parallelogram"){
         new_shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        var path = "M {0} {1} L {2} {3} L {4} {5} L {6} {7} L {8} {9} L {10} {11}".format(x-width/2+height/2,y-height/2,
+        var path = "M {0} {1} L {2} {3} L {4} {5} L {6} {7} L {8} {9}".format(x-width/2+height/2,y-height/2,
                                                                                             x+width/2,y-height/2,
                                                                                             x+width/2-height/2,y+height/2,
                                                                                             x-width/2,y+height/2,
@@ -31,7 +31,7 @@ function create_shape(shape, text, x, y, width, height){
         new_shape.setAttributeNS(null, "height", height);
     }else if(shape == "diamond"){
         new_shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        var path = "M {0} {1} L {2} {3} L {4} {5} L {6} {7} L {8} {9} L {10} {11}".format(x,y-height/2,
+        var path = "M {0} {1} L {2} {3} L {4} {5} L {6} {7} L {8} {9}".format(x,y-height/2,
                                                                                             x+width/2,y,
                                                                                             x,y+height/2,
                                                                                             x-width/2,y,
