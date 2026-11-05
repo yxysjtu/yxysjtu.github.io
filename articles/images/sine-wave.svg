@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 140" role="img" aria-label="一条穿过中线的正弦波">
+  <rect width="490" height="140" fill="#f4f4f4"/>
+  <line x1="20" y1="70" x2="470" y2="70" stroke="#c9c9c9" stroke-width="1"/>
+  <path d="M20 70 C 47.5 10, 82.5 10, 110 70 S 172.5 130, 200 70 S 262.5 10, 290 70 S 352.5 130, 380 70 S 442.5 10, 470 70" fill="none" stroke="#1f5fa8" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
