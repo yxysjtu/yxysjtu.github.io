@@ -44,9 +44,9 @@ LABELS = {  # 文件夹的显示名；没写的会由文件夹名自动生成（
 }
 GISCUS = {  # 评论和表情回应，存在 GitHub Discussions 里。开通方法见 README；两个 ID 没填时不显示评论区
     "repo": "yxysjtu/yxysjtu.github.io",
-    "repo_id": "",
+    "repo_id": "R_kgDOVkSN5A",
     "category": "Announcements",
-    "category_id": "",
+    "category_id": "DIC_kwDOVkSN5M4DKd4o",
 }
 # --------------------------
 
@@ -429,7 +429,7 @@ def comments_html():
         f'<script src="https://giscus.app/client.js" data-repo="{e(GISCUS["repo"])}" data-repo-id="{e(GISCUS["repo_id"])}" '
         f'data-category="{e(GISCUS["category"])}" data-category-id="{e(GISCUS["category_id"])}" '
         'data-mapping="pathname" data-strict="1" data-reactions-enabled="1" data-emit-metadata="0" '
-        'data-input-position="bottom" data-theme="light" data-lang="zh-CN" data-loading="lazy" '
+        'data-input-position="bottom" data-theme="light" data-lang="zh-CN" '
         'crossorigin="anonymous" async></script></section>'
     )
 
