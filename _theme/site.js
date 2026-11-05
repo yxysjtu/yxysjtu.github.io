@@ -67,22 +67,45 @@
     alignFrameBar(); // iframe 可能在脚本运行前就加载好了
   }
 
-  // ---------- 标签筛选（文章页，#tag=xxx） ----------
-  var chips = document.querySelectorAll('.chip');
-  if (chips.length) {
+  // ---------- 标签和日期筛选（文章页，#tag=xxx&date=2026-11） ----------
+  var dateSelect = document.getElementById('date-filter');
+  if (dateSelect) {
+    var chips = document.querySelectorAll('.chip');
     var posts = document.querySelectorAll('.post');
-    var applyTag = function () {
-      var match = location.hash.match(/^#tag=(.+)$/);
-      var tag = match ? decodeURIComponent(match[1]) : '';
-      chips.forEach(function (chip) {
-        chip.classList.toggle('active', chip.dataset.tag === tag);
-      });
-      posts.forEach(function (post) {
-        post.hidden = tag !== '' && JSON.parse(post.dataset.tags).indexOf(tag) === -1;
-      });
+    var noMatch = document.getElementById('no-match');
+    var filterHash = function (tag, date) {
+      var parts = [];
+      if (tag) parts.push('tag=' + encodeURIComponent(tag));
+      if (date) parts.push('date=' + encodeURIComponent(date));
+      return '#' + parts.join('&');
     };
-    window.addEventListener('hashchange', applyTag);
-    applyTag();
+    var currentFilters = function () {
+      var params = new URLSearchParams(location.hash.slice(1));
+      var date = params.get('date') || '';
+      var known = Array.prototype.some.call(dateSelect.options, function (option) { return option.value === date; });
+      return { tag: params.get('tag') || '', date: known ? date : '' };
+    };
+    var applyFilters = function () {
+      var filters = currentFilters();
+      dateSelect.value = filters.date;
+      chips.forEach(function (chip) {
+        chip.classList.toggle('active', chip.dataset.tag === filters.tag);
+        chip.setAttribute('href', filterHash(chip.dataset.tag, filters.date)); // 切换标签时保留日期
+      });
+      var visible = 0;
+      posts.forEach(function (post) {
+        var tagOk = !filters.tag || JSON.parse(post.dataset.tags).indexOf(filters.tag) !== -1;
+        var dateOk = post.querySelector('time').getAttribute('datetime').indexOf(filters.date) === 0;
+        post.hidden = !(tagOk && dateOk);
+        if (!post.hidden) visible++;
+      });
+      noMatch.hidden = visible > 0;
+    };
+    dateSelect.addEventListener('change', function () {
+      location.hash = filterHash(currentFilters().tag, dateSelect.value);
+    });
+    window.addEventListener('hashchange', applyFilters);
+    applyFilters();
   }
 
   // ---------- 搜索 ----------

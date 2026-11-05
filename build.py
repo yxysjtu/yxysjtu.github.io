@@ -511,11 +511,27 @@ def render_blog(section, sections, index):
         f'<a class="chip" href="#tag={quote(tag)}" data-tag="{e(tag)}">{e(tag)}<span>{n}</span></a>'
         for tag, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
     )
-    filters = (
-        f'<div class="filters" aria-label="按标签筛选"><a class="chip" href="#" data-tag="">全部<span>{len(posts)}</span></a>{chips}</div>'
-        if chips else ""
+    if chips:
+        chips = f'<a class="chip" href="#" data-tag="">全部<span>{len(posts)}</span></a>{chips}'
+
+    # 日期选项：每年一项，后面跟这一年有文章的月份，都是新的在前
+    date_counts = {}
+    for post in posts:
+        for period in (post.date[:4], post.date[:7]):
+            date_counts[period] = date_counts.get(period, 0) + 1
+    options = "".join(
+        f'<option value="{e(period)}">{e(period)}（{n}）</option>'
+        for period, n in sorted(date_counts.items(), key=lambda x: (x[0][:4], x[0] if len(x[0]) > 4 else "~"), reverse=True)
     )
-    content = post_list(root, posts) if posts else '<p class="empty">还没有文章。</p>'
+    filters = (
+        f'<div class="filters">{chips}<select id="date-filter" aria-label="按日期筛选">'
+        f'<option value="">全部日期</option>{options}</select></div>'
+        if posts else ""
+    )
+    if posts:
+        content = post_list(root, posts) + '<p id="no-match" class="empty" hidden>没有符合条件的文章。</p>'
+    else:
+        content = '<p class="empty">还没有文章。</p>'
     emit(section.url, section.name,
          f'<main class="container"><h1 class="page-title">{e(section.name)}</h1>{filters}{content}</main>',
          sections, section.rel)
