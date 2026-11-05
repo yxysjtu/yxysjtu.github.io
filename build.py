@@ -425,7 +425,7 @@ def comments_html():
     if not (GISCUS["repo_id"] and GISCUS["category_id"]):
         return ""
     return (
-        '<section class="comments" aria-label="评论"><h2>评论</h2>'
+        '<section class="comments" aria-label="Comments"><h2>Comments</h2>'
         f'<script src="https://giscus.app/client.js" data-repo="{e(GISCUS["repo"])}" data-repo-id="{e(GISCUS["repo_id"])}" '
         f'data-category="{e(GISCUS["category"])}" data-category-id="{e(GISCUS["category_id"])}" '
         'data-mapping="pathname" data-strict="1" data-reactions-enabled="1" data-emit-metadata="0" '
@@ -446,10 +446,11 @@ def render_doc(doc, crumbs, active, sections):
         emit(doc.url, doc.title, body, sections, active, body_class="frame-page")
         return
     tags = f'<div class="tags">{tag_links(root, doc.tags)}</div>' if doc.tags else ""
+    comments = comments_html() if doc.src.startswith(f"{BLOG_SECTION}/") else ""  # 只有文章有评论，课程内容没有
     body = (
         f'<main class="container">{trail}<article class="doc"><header class="doc-head"><h1>{e(doc.title)}</h1>'
         f'<div class="doc-meta"><time datetime="{e(doc.date)}">{e(doc.date)}</time>{tags}</div></header>'
-        f'{toc_html(doc.html)}<div class="prose">{doc.html}</div></article>{comments_html()}</main>'
+        f'{toc_html(doc.html)}<div class="prose">{doc.html}</div></article>{comments}</main>'
     )
     emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html)
 

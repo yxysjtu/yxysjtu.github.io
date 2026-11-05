@@ -77,7 +77,7 @@ summary: 摘要      # 默认取第一段，超过 120 字时截断并加 ...（
 
 ## 评论和表情回应
 
-文章和笔记页底部可以显示 [giscus](https://giscus.app/zh-CN) 评论区，数据存在本仓库的 GitHub Discussions 里。开通步骤（仓库要先推送到 GitHub，并且是公开的）：
+文章页底部可以显示 [giscus](https://giscus.app/zh-CN) 评论区，数据存在本仓库的 GitHub Discussions 里。开通步骤（仓库要先推送到 GitHub，并且是公开的）：
 
 1. 在仓库的 Settings → General → Features 里勾选 Discussions。
 2. 安装 [giscus app](https://github.com/apps/giscus)，授权给这个仓库。
