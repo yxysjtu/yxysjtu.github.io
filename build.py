@@ -514,20 +514,16 @@ def render_blog(section, sections, index):
     if chips:
         chips = f'<a class="chip" href="#" data-tag="">全部<span>{len(posts)}</span></a>{chips}'
 
-    # 日期选项：每年一项，后面跟这一年有文章的月份，都是新的在前
-    date_counts = {}
-    for post in posts:
-        for period in (post.date[:4], post.date[:7]):
-            date_counts[period] = date_counts.get(period, 0) + 1
-    options = "".join(
-        f'<option value="{e(period)}">{e(period)}（{n}）</option>'
-        for period, n in sorted(date_counts.items(), key=lambda x: (x[0][:4], x[0] if len(x[0]) > 4 else "~"), reverse=True)
+    # 起止日期和日历，日历由 site.js 根据页面上的文章日期生成
+    date_range = (
+        '<div class="date-range" id="date-range">'
+        '<input id="date-from" type="text" placeholder="开始日期" aria-label="开始日期" autocomplete="off">'
+        '<span class="date-sep">–</span>'
+        '<input id="date-to" type="text" placeholder="结束日期" aria-label="结束日期" autocomplete="off">'
+        '<button type="button" id="date-clear" aria-label="清除日期" hidden>×</button>'
+        '<div class="calendar" id="date-calendar" hidden></div></div>'
     )
-    filters = (
-        f'<div class="filters">{chips}<select id="date-filter" aria-label="按日期筛选">'
-        f'<option value="">全部日期</option>{options}</select></div>'
-        if posts else ""
-    )
+    filters = f'<div class="filters">{chips}{date_range}</div>' if posts else ""
     if posts:
         content = post_list(root, posts) + '<p id="no-match" class="empty" hidden>没有符合条件的文章。</p>'
     else:

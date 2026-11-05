@@ -67,42 +67,197 @@
     alignFrameBar(); // iframe 可能在脚本运行前就加载好了
   }
 
-  // ---------- 标签和日期筛选（文章页，#tag=xxx&date=2026-11） ----------
-  var dateSelect = document.getElementById('date-filter');
-  if (dateSelect) {
+  // ---------- 标签和日期筛选（文章页，#tag=xxx&from=2026-11-01&to=2026-11-30） ----------
+  var dateRange = document.getElementById('date-range');
+  if (dateRange) {
     var chips = document.querySelectorAll('.chip');
     var posts = document.querySelectorAll('.post');
     var noMatch = document.getElementById('no-match');
-    var filterHash = function (tag, date) {
+    var fromInput = document.getElementById('date-from');
+    var toInput = document.getElementById('date-to');
+    var clearButton = document.getElementById('date-clear');
+    var calendar = document.getElementById('date-calendar');
+
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var formatDate = function (y, m, d) { return y + '-' + pad(m + 1) + '-' + pad(d); };
+    var parseDate = function (text) { // 接受 2026-1-5、2026/1/5、2026.1.5，不存在的日期返回 null
+      var match = /^\s*(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})\s*$/.exec(text || '');
+      if (!match) return null;
+      var y = +match[1], m = +match[2] - 1, d = +match[3];
+      var date = new Date(y, m, d);
+      return date.getMonth() === m && date.getDate() === d ? formatDate(y, m, d) : null;
+    };
+    var today = function () {
+      var now = new Date();
+      return formatDate(now.getFullYear(), now.getMonth(), now.getDate());
+    };
+
+    var postCounts = {}; // 每天有几篇文章，日历用它打点
+    var latestPost = '';
+    posts.forEach(function (post) {
+      var date = post.querySelector('time').getAttribute('datetime');
+      postCounts[date] = (postCounts[date] || 0) + 1;
+      if (date > latestPost) latestPost = date;
+    });
+
+    var filterHash = function (tag, from, to) {
       var parts = [];
       if (tag) parts.push('tag=' + encodeURIComponent(tag));
-      if (date) parts.push('date=' + encodeURIComponent(date));
+      if (from) parts.push('from=' + from);
+      if (to) parts.push('to=' + to);
       return '#' + parts.join('&');
     };
     var currentFilters = function () {
       var params = new URLSearchParams(location.hash.slice(1));
-      var date = params.get('date') || '';
-      var known = Array.prototype.some.call(dateSelect.options, function (option) { return option.value === date; });
-      return { tag: params.get('tag') || '', date: known ? date : '' };
+      var from = parseDate(params.get('from')) || '';
+      var to = parseDate(params.get('to')) || '';
+      if (from && to && from > to) { var swap = from; from = to; to = swap; }
+      return { tag: params.get('tag') || '', from: from, to: to };
     };
+
+    // ----- 日历 -----
+    var activeField = 'from'; // 点日历时填哪个输入框
+    var viewYear = 0;
+    var viewMonth = 0;
+    var WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+
+    var navButton = function (label, text, years, months) {
+      return '<button type="button" class="calendar-nav" aria-label="' + label + '" data-years="' + years +
+        '" data-months="' + months + '">' + text + '</button>';
+    };
+    var renderCalendar = function () {
+      var filters = currentFilters();
+      var html = '<div class="calendar-head">' + navButton('上一年', '«', -1, 0) + navButton('上个月', '‹', 0, -1) +
+        '<span class="calendar-title" aria-live="polite">' + viewYear + ' 年 ' + (viewMonth + 1) + ' 月</span>' +
+        navButton('下个月', '›', 0, 1) + navButton('下一年', '»', 1, 0) + '</div><div class="calendar-grid">';
+      WEEKDAYS.forEach(function (name) { html += '<span class="calendar-weekday">' + name + '</span>'; });
+      var offset = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7; // 每周从周一开始
+      for (var i = 0; i < offset; i++) html += '<span></span>';
+      var days = new Date(viewYear, viewMonth + 1, 0).getDate();
+      for (var d = 1; d <= days; d++) {
+        var date = formatDate(viewYear, viewMonth, d);
+        var count = postCounts[date] || 0;
+        var isEdge = date === filters.from || date === filters.to;
+        var inRange = filters.from && filters.to && date > filters.from && date < filters.to;
+        var classes = 'calendar-day' + (count ? ' has-post' : '') + (isEdge ? ' is-edge' : '') +
+          (inRange ? ' in-range' : '') + (date === today() ? ' is-today' : '');
+        var label = date + (count ? '，' + count + ' 篇文章' : '');
+        html += '<button type="button" class="' + classes + '" data-date="' + date + '" aria-label="' + label +
+          '" title="' + label + '"' + (isEdge ? ' aria-pressed="true"' : '') + '>' + d + '</button>';
+      }
+      calendar.innerHTML = html + '</div>';
+    };
+    var showMonthOf = function (date) {
+      viewYear = +date.slice(0, 4);
+      viewMonth = +date.slice(5, 7) - 1;
+    };
+    var openCalendar = function () {
+      if (!calendar.hidden) return;
+      var filters = currentFilters();
+      showMonthOf((activeField === 'to' ? filters.to || filters.from : filters.from || filters.to) || latestPost || today());
+      renderCalendar();
+      calendar.hidden = false;
+    };
+    var closeCalendar = function () { calendar.hidden = true; };
+
+    // ----- 筛选 -----
     var applyFilters = function () {
       var filters = currentFilters();
-      dateSelect.value = filters.date;
+      fromInput.value = filters.from;
+      toInput.value = filters.to;
+      fromInput.classList.remove('invalid');
+      toInput.classList.remove('invalid');
+      clearButton.hidden = !(filters.from || filters.to);
       chips.forEach(function (chip) {
         chip.classList.toggle('active', chip.dataset.tag === filters.tag);
-        chip.setAttribute('href', filterHash(chip.dataset.tag, filters.date)); // 切换标签时保留日期
+        chip.setAttribute('href', filterHash(chip.dataset.tag, filters.from, filters.to)); // 切换标签时保留日期
       });
       var visible = 0;
       posts.forEach(function (post) {
+        var date = post.querySelector('time').getAttribute('datetime');
         var tagOk = !filters.tag || JSON.parse(post.dataset.tags).indexOf(filters.tag) !== -1;
-        var dateOk = post.querySelector('time').getAttribute('datetime').indexOf(filters.date) === 0;
+        var dateOk = (!filters.from || date >= filters.from) && (!filters.to || date <= filters.to);
         post.hidden = !(tagOk && dateOk);
         if (!post.hidden) visible++;
       });
       noMatch.hidden = visible > 0;
+      if (!calendar.hidden) renderCalendar();
     };
-    dateSelect.addEventListener('change', function () {
-      location.hash = filterHash(currentFilters().tag, dateSelect.value);
+    var setDates = function (from, to) {
+      location.hash = filterHash(currentFilters().tag, from, to);
+      applyFilters();
+    };
+    var commitInput = function (input) { // 手动输入的日期：格式不对就标红，不改变筛选
+      var filters = currentFilters();
+      var text = input.value.trim();
+      var date = parseDate(text);
+      if (text && !date) {
+        input.classList.add('invalid');
+        return false;
+      }
+      var from = input === fromInput ? date || '' : filters.from;
+      var to = input === toInput ? date || '' : filters.to;
+      if (from && to && from > to) { var swap = from; from = to; to = swap; }
+      setDates(from, to);
+      if (date && !calendar.hidden) { showMonthOf(date); renderCalendar(); }
+      return true;
+    };
+
+    [fromInput, toInput].forEach(function (input) {
+      var field = input === fromInput ? 'from' : 'to';
+      var activate = function () { activeField = field; openCalendar(); };
+      input.addEventListener('focus', activate);
+      input.addEventListener('click', activate);
+      input.addEventListener('change', function () { commitInput(input); });
+      input.addEventListener('input', function () { input.classList.remove('invalid'); });
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' && commitInput(input)) {
+          closeCalendar();
+          input.blur();
+        }
+      });
+    });
+    clearButton.addEventListener('click', function () {
+      setDates('', '');
+      closeCalendar();
+    });
+    // 点日历时不让输入框失去焦点，否则会触发 change 并打断选择
+    calendar.addEventListener('mousedown', function (event) { event.preventDefault(); });
+    calendar.addEventListener('click', function (event) {
+      var button = event.target.closest('button');
+      if (!button) return;
+      if (button.classList.contains('calendar-nav')) {
+        var month = new Date(viewYear + +button.dataset.years, viewMonth + +button.dataset.months, 1);
+        viewYear = month.getFullYear();
+        viewMonth = month.getMonth();
+        renderCalendar();
+        return;
+      }
+      var filters = currentFilters();
+      var day = button.dataset.date;
+      if (activeField === 'from') {
+        setDates(day, filters.to && filters.to >= day ? filters.to : ''); // 新的开始日期晚于结束日期时，清空结束日期
+        activeField = 'to';
+        toInput.focus();
+      } else {
+        if (filters.from && day < filters.from) setDates(day, filters.from);
+        else setDates(filters.from, day);
+        closeCalendar();
+        toInput.blur();
+      }
+    });
+    document.addEventListener('click', function (event) {
+      // 看点击路径而不是 event.target：日历重绘后，被点的按钮已经不在页面上了
+      if (event.composedPath().indexOf(dateRange) === -1) closeCalendar();
+    });
+    document.addEventListener('focusin', function (event) {
+      if (!event.target.closest('#date-range')) closeCalendar();
+    });
+    dateRange.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        closeCalendar();
+        document.activeElement.blur();
+      }
     });
     window.addEventListener('hashchange', applyFilters);
     applyFilters();
