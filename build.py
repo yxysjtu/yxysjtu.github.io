@@ -327,11 +327,18 @@ def scan(path):
 def copy_files(section):
     """除 Markdown 外的文件原样复制（实验 HTML、图片等），保持相对路径不变。"""
     for dirpath, dirnames, filenames in os.walk(ROOT / section):
-        dirnames[:] = [d for d in dirnames if not d.startswith((".", "_"))]
+        # 修改点 1：只过滤 . 开头的文件夹，允许 os.walk 进入 _ 开头的文件夹（如 _images）
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for filename in filenames:
             src = Path(dirpath) / filename
-            if ignored(src) or src.suffix.lower() in (".md", ".markdown"):
+            
+            # ======== 修改这里 ========
+            # 修改前：if ignored(src) or src.suffix.lower() in (".md", ".markdown"):
+            # 修改后：不再使用 ignored(src) 拦截，直接放行 _ 开头的文件，只拦截 . 开头的隐藏文件和 md 文件
+            if src.name.startswith(".") or src.suffix.lower() in (".md", ".markdown"):
                 continue
+            # ==========================
+            
             dst = SITE / src.relative_to(ROOT)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
