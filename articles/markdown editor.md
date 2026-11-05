@@ -8,7 +8,7 @@ tags: [技术]
 
 [仓库](https://github.com/yxysjtu/markdown-editor)
 
-![](_images/image-20261105-225448.png)
+![](images/image-20261105-230235.png)
 
 ## 使用
 
