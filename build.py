@@ -429,7 +429,7 @@ def comments_html():
         f'<script src="https://giscus.app/client.js" data-repo="{e(GISCUS["repo"])}" data-repo-id="{e(GISCUS["repo_id"])}" '
         f'data-category="{e(GISCUS["category"])}" data-category-id="{e(GISCUS["category_id"])}" '
         'data-mapping="pathname" data-strict="1" data-reactions-enabled="1" data-emit-metadata="0" '
-        'data-input-position="bottom" data-theme="light" data-lang="zh-CN" '
+        'data-input-position="bottom" data-theme="light" data-lang="en" '
         'crossorigin="anonymous" async></script></section>'
     )
 
