@@ -1,6 +1,7 @@
 (function () {
   var ROOT = document.currentScript.dataset.root;
   var ASSET_VERSION = document.currentScript.src.split('?')[1] || '';
+  var TEXT = window.SITE_TEXT; // 界面文字，由 build.py 按 config.py 的语言写在这个文件开头
 
   // ---------- 数学公式 ----------
   if (window.renderMathInElement) {
@@ -119,7 +120,6 @@
     var activeField = 'from'; // 点日历时填哪个输入框
     var viewYear = 0;
     var viewMonth = 0;
-    var WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
     var navButton = function (label, text, years, months) {
       return '<button type="button" class="calendar-nav" aria-label="' + label + '" data-years="' + years +
@@ -127,10 +127,11 @@
     };
     var renderCalendar = function () {
       var filters = currentFilters();
-      var html = '<div class="calendar-head">' + navButton('上一年', '«', -1, 0) + navButton('上个月', '‹', 0, -1) +
-        '<span class="calendar-title" aria-live="polite">' + viewYear + ' 年 ' + (viewMonth + 1) + ' 月</span>' +
-        navButton('下个月', '›', 0, 1) + navButton('下一年', '»', 1, 0) + '</div><div class="calendar-grid">';
-      WEEKDAYS.forEach(function (name) { html += '<span class="calendar-weekday">' + name + '</span>'; });
+      var title = new Date(viewYear, viewMonth, 1).toLocaleDateString(document.documentElement.lang, { year: 'numeric', month: 'long' });
+      var html = '<div class="calendar-head">' + navButton(TEXT.prev_year, '«', -1, 0) + navButton(TEXT.prev_month, '‹', 0, -1) +
+        '<span class="calendar-title" aria-live="polite">' + title + '</span>' +
+        navButton(TEXT.next_month, '›', 0, 1) + navButton(TEXT.next_year, '»', 1, 0) + '</div><div class="calendar-grid">';
+      TEXT.weekdays.forEach(function (name) { html += '<span class="calendar-weekday">' + name + '</span>'; });
       var offset = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7; // 每周从周一开始
       for (var i = 0; i < offset; i++) html += '<span></span>';
       var days = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -141,7 +142,7 @@
         var inRange = filters.from && filters.to && date > filters.from && date < filters.to;
         var classes = 'calendar-day' + (count ? ' has-post' : '') + (isEdge ? ' is-edge' : '') +
           (inRange ? ' in-range' : '') + (date === today() ? ' is-today' : '');
-        var label = date + (count ? '，' + count + ' 篇文章' : '');
+        var label = count ? TEXT.day_posts[count === 1 ? 0 : 1].replace('{date}', date).replace('{n}', count) : date;
         html += '<button type="button" class="' + classes + '" data-date="' + date + '" aria-label="' + label +
           '" title="' + label + '"' + (isEdge ? ' aria-pressed="true"' : '') + '>' + d + '</button>';
       }
@@ -350,7 +351,7 @@
     if (!results.length) {
       var empty = document.createElement('div');
       empty.className = 'search-empty';
-      empty.textContent = '没有找到相关内容';
+      empty.textContent = TEXT.search_empty;
       box.appendChild(empty);
       return;
     }

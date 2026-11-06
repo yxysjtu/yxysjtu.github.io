@@ -103,14 +103,22 @@ mark { background: #fbe8a6; color: inherit; border-radius: 2px; }
 .post { padding: 22px 0; border-bottom: 1px solid var(--border); }
 .post:last-child { border-bottom: 0; }
 .post[hidden] { display: none; }
-.post time { color: var(--muted); font-size: 13px; }
+.post-meta { display: flex; flex-wrap: wrap; gap: 0 10px; color: var(--muted); font-size: 13px; }
+.post-path a:hover { color: var(--text); text-decoration: underline; }
 .post h2 { margin: 2px 0 6px; font-size: 20px; line-height: 1.4; }
 .post h2 a:hover { color: var(--accent); }
 .post p { margin: 0 0 10px; color: #4a4a4a; font-size: 15px; }
 
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag { padding: 0 8px; border-radius: 4px; background: var(--surface); color: var(--muted); font-size: 12px; line-height: 22px; }
-.tag:hover { background: var(--surface-hover); color: var(--text); }
+a.tag:hover { background: var(--surface-hover); color: var(--text); }
+
+/* 列表视图里进入子文件夹的入口 */
+.categories { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.category { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 14px; font-weight: 600; }
+.category .icon { width: 18px; height: 18px; }
+.category span { color: var(--muted); font-size: 12px; font-weight: 400; }
+.category:hover { background: var(--surface); }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .chip { display: inline-flex; gap: 6px; padding: 2px 12px; border: 1px solid var(--border); border-radius: 999px; font-size: 14px; color: #444; }
@@ -152,7 +160,6 @@ mark { background: #fbe8a6; color: inherit; border-radius: 2px; }
 .card {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   min-height: 160px;
   padding: 20px;
   background: var(--surface);
@@ -162,9 +169,10 @@ mark { background: #fbe8a6; color: inherit; border-radius: 2px; }
 }
 .card:hover { background: var(--surface-hover); }
 .icon { width: 24px; height: 24px; fill: none; stroke: #6b6b6b; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-.card-body { display: block; margin-top: 20px; }
+.card-body { flex: 1; display: flex; flex-direction: column; margin-top: 20px; } /* 内容靠上，日期固定在底部 */
 .card-title { display: block; font-weight: 600; line-height: 1.4; }
-.card-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 14px; }
+.card-summary { display: block; margin-top: 4px; color: #4a4a4a; font-size: 14px; line-height: 1.5; }
+.card-meta { display: block; margin-top: auto; padding-top: 6px; color: var(--muted); font-size: 14px; }
 
 /* 正文 */
 .doc-head { margin: 12px 0 28px; }

@@ -3,7 +3,7 @@
 
 约定：
 - 根目录下每个第一级文件夹就是导航栏的一项（以 . 或 _ 开头的文件夹除外）。
-- BLOG_SECTION 那个文件夹显示为博客列表（带标签筛选），其余显示为文件夹卡片。
+- 每个栏目用列表视图还是卡片视图，以及其他配置项，都在 config.py 里。
 - .md 转成网页；.html 原样保留并嵌入带导航栏的页面；其他文件（图片等）原样复制。
 """
 import json
@@ -14,7 +14,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import date
-from html import escape as e
+from html import escape as e, unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
@@ -30,25 +30,15 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
-# ---------- 配置 ----------
-SITE_TITLE = "yu"
-SITE_DESCRIPTION = "致力于折腾好玩的东西"
-BLOG_SECTION = "articles"  # 这个第一级文件夹按博客方式显示
-RECENT_POSTS = 10  # 主页显示几篇最近的文章
-SUMMARY_LENGTH = 120  # 自动摘要（第一段）超过多少字就截断并加 ...
-LABELS = {  # 文件夹的显示名；没写的会由文件夹名自动生成（signal processing → Signal Processing）
-    "articles": "文章",
-    "courses": "课程",
-    "notes": "笔记",
-    "experiments": "实验",
-}
-GISCUS = {  # 评论和表情回应，存在 GitHub Discussions 里。开通方法见 README；两个 ID 没填时不显示评论区
-    "repo": "yxysjtu/yxysjtu.github.io",
-    "repo_id": "R_kgDOVkSN5A",
-    "category": "Announcements",
-    "category_id": "DIC_kwDOVkSN5M4DKd4o",
-}
-# --------------------------
+from config import GISCUS, LABELS, LANGUAGE, RECENT_POSTS, SECTIONS, SITE_DESCRIPTION, SITE_TITLE, SUMMARY_LENGTH
+from i18n import LANGUAGES
+
+if LANGUAGE not in LANGUAGES:
+    raise SystemExit(f"config.py：LANGUAGE 只能是 {' 或 '.join(LANGUAGES)}")
+TEXT = LANGUAGES[LANGUAGE]
+
+SECTION_DEFAULTS = {"view": "cards", "comments": False, "home": False}
+VIEWS = ("list", "cards")
 
 ROOT = Path(__file__).resolve().parent
 SITE = ROOT / "_site"
@@ -75,10 +65,12 @@ class Doc:
     title: str
     date: str
     tags: list = field(default_factory=list)
-    summary: str = ""
+    summary: str = ""  # 列表上显示：手写的，没写就自动生成
+    written_summary: str = ""  # 卡片上显示：只有手写的，这样卡片可以不带描述
     html: str = ""
     text: str = ""
     sort_name: str = ""
+    crumbs: list = field(default_factory=list)  # 从栏目到所在文件夹的路径 [(显示名, 网址), ...]
 
 
 @dataclass
@@ -110,6 +102,27 @@ class Folder:
 # ---------- 工具函数 ----------
 def ignored(path):
     return path.name.startswith((".", "_"))
+
+
+def section_option(section, key):
+    return SECTIONS.get(section, {}).get(key, SECTION_DEFAULTS[key])
+
+
+def section_of(doc):
+    return doc.src.split("/", 1)[0]
+
+
+def check_sections(dirs):
+    """写错的配置不报错的话，只会悄悄用默认设置，很难发现。"""
+    names = {p.name for p in dirs}
+    for name, options in SECTIONS.items():
+        unknown = set(options) - set(SECTION_DEFAULTS)
+        if unknown:
+            raise SystemExit(f"config.py：栏目 {name} 有不认识的设置 {sorted(unknown)}，可以写的是 {sorted(SECTION_DEFAULTS)}")
+        if section_option(name, "view") not in VIEWS:
+            raise SystemExit(f"config.py：栏目 {name} 的 view 只能是 {' 或 '.join(VIEWS)}")
+        if name not in names:
+            print(f"提醒：config.py 里写了栏目 {name}，但根目录下没有这个文件夹")
 
 
 def natural_key(name):
@@ -251,7 +264,12 @@ def parse_tags(value):
 
 
 def truncate(text):
-    return text[:SUMMARY_LENGTH] + "..." if len(text) > SUMMARY_LENGTH else text
+    if len(text) <= SUMMARY_LENGTH:
+        return text
+    cut = text[:SUMMARY_LENGTH]
+    if re.match(r"[A-Za-z0-9]{2}", text[SUMMARY_LENGTH - 1:]):  # 正好切在英文单词中间，退回到单词开头
+        cut = re.sub(r"[A-Za-z0-9]+$", "", cut) or cut
+    return cut.rstrip() + "..."
 
 
 def excerpt(html):
@@ -272,6 +290,7 @@ def load_markdown(path, rel):
     # 笔记之间的 [链接](other.md) 指向生成后的网页
     html = re.sub(r'href="(?![a-z]+:|#)([^"]+?)\.(?:md|markdown)(#[^"]*)?"',
                   lambda m: f'href="{m.group(1)}.html{m.group(2) or ""}"', html)
+    written_summary = str(meta.get("summary") or "")
     return Doc(
         src=rel,
         url=str(Path(rel).with_suffix(".html").as_posix()),
@@ -279,24 +298,36 @@ def load_markdown(path, rel):
         title=str(meta.get("title") or (heading and plain_text(heading.group(1))) or prettify(path.stem)),
         date=doc_date(path, meta.get("date")),
         tags=parse_tags(meta.get("tags")),
-        summary=str(meta.get("summary") or excerpt(html)),
+        summary=written_summary or excerpt(html),
+        written_summary=written_summary,
         html=html,
         text=plain_text(html),
         sort_name=path.name,
     )
 
 
+def meta_description(source):
+    """HTML 文件没有 frontmatter，手写的摘要取 <meta name="description" content="...">。"""
+    for tag in re.findall(r"<meta\b[^>]*>", source, re.I):
+        if re.search(r"""\bname\s*=\s*["']?description\b""", tag, re.I):
+            content = re.search(r"""\bcontent\s*=\s*(["'])(.*?)\1""", tag, re.I | re.S)
+            return unescape(content.group(2)).strip() if content else ""
+    return ""
+
+
 def load_html(path, rel):
     source = read_text(path)
     title = re.search(r"<title[^>]*>(.*?)</title>", source, re.S | re.I)
     text = plain_text(source)
+    written_summary = meta_description(source)
     return Doc(
         src=rel,
         url=str(Path(rel).with_name(path.stem + ".view.html").as_posix()),
         kind="html",
         title=re.sub(r"\s+", " ", title.group(1)).strip() if title and title.group(1).strip() else prettify(path.stem),
         date=doc_date(path),
-        summary=truncate(text),
+        summary=written_summary or truncate(text),
+        written_summary=written_summary,
         text=text,
         sort_name=path.name,
     )
@@ -358,7 +389,7 @@ def emit(url, title, body, sections, active=None, math=False, body_class=""):
     ) if math else ""
     page_title = f"{title} · {SITE_TITLE}" if title != SITE_TITLE else title
     html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{e(TEXT['html_lang'])}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -372,9 +403,9 @@ def emit(url, title, body, sections, active=None, math=False, body_class=""):
 <header class="site-header">
   <div class="header-inner">
     <a class="brand" href="{root}index.html">{e(SITE_TITLE)}</a>
-    <nav class="nav" aria-label="主导航">{nav}</nav>
+    <nav class="nav" aria-label="{e(TEXT['main_nav'])}">{nav}</nav>
     <div class="search" role="search">
-      <input id="search-input" type="search" placeholder="搜索全部内容" aria-label="搜索全部内容" autocomplete="off">
+      <input id="search-input" type="search" placeholder="{e(TEXT['search'])}" aria-label="{e(TEXT['search'])}" autocomplete="off">
       <div id="search-results" class="search-results" hidden></div>
     </div>
   </div>
@@ -391,21 +422,29 @@ def emit(url, title, body, sections, active=None, math=False, body_class=""):
 def crumbs_html(root, crumbs, current):
     parts = [f'<a href="{link(root, url)}">{e(name)}</a>' for name, url in crumbs]
     parts.append(f'<span aria-current="page">{e(current)}</span>')
-    return f'<nav class="crumbs" aria-label="路径">{"<span class=sep>/</span>".join(parts)}</nav>'
+    separator = "<span class=sep>/</span>"
+    return f'<nav class="crumbs" aria-label="{e(TEXT["breadcrumb"])}">{separator.join(parts)}</nav>'
 
 
-def tag_links(root, tags):
-    return "".join(f'<a class="tag" href="{root}{quote(BLOG_SECTION)}/index.html#tag={quote(t)}">{e(t)}</a>' for t in tags)
+def tag_links(root, doc):
+    """列表视图的栏目可以按标签筛选，标签链接到栏目页；卡片视图的栏目没有筛选，只显示文字。"""
+    section = section_of(doc)
+    if section_option(section, "view") != "list":
+        return "".join(f'<span class="tag">{e(t)}</span>' for t in doc.tags)
+    return "".join(f'<a class="tag" href="{root}{quote(section)}/index.html#tag={quote(t)}">{e(t)}</a>' for t in doc.tags)
 
 
-def post_list(root, posts):
+def post_list(root, posts, depth):
+    """depth 是当前页面所在的层数，文章的路径只显示比它更深的部分。"""
     items = []
     for post in posts:
-        tags = f'<div class="tags">{tag_links(root, post.tags)}</div>' if post.tags else ""
+        tags = f'<div class="tags">{tag_links(root, post)}</div>' if post.tags else ""
         summary = f"<p>{e(post.summary)}</p>" if post.summary else ""
+        path = " / ".join(f'<a href="{link(root, url)}">{e(name)}</a>' for name, url in post.crumbs[depth:])
+        path = f'<span class="post-path">{path}</span>' if path else ""
         items.append(
             f'<article class="post" data-tags="{e(json.dumps(post.tags, ensure_ascii=False))}">'
-            f'<time datetime="{e(post.date)}">{e(post.date)}</time>'
+            f'<div class="post-meta"><time datetime="{e(post.date)}">{e(post.date)}</time>{path}</div>'
             f'<h2><a href="{link(root, post.url)}">{e(post.title)}</a></h2>{summary}{tags}</article>'
         )
     return f'<div class="post-list">{"".join(items)}</div>'
@@ -422,9 +461,10 @@ def toc_html(html):
         inner = re.sub(r"<sup\b.*?</sup>|</?a\b[^>]*>", "", inner, flags=re.S)  # 去掉脚注和嵌套链接
         items.append(f'<li class="toc-l{int(level) - top}"><a href="#{anchor}">{inner}</a></li>')
     links = f'<ul>{"".join(items)}</ul>'
+    title = e(TEXT["toc"])
     return (
-        f'<aside class="toc toc-side" aria-label="目录"><div class="toc-sticky"><div class="toc-title">目录</div>{links}</div></aside>'
-        f'<details class="toc toc-inline"><summary>目录</summary>{links}</details>'
+        f'<aside class="toc toc-side" aria-label="{title}"><div class="toc-sticky"><div class="toc-title">{title}</div>{links}</div></aside>'
+        f'<details class="toc toc-inline"><summary>{title}</summary>{links}</details>'
     )
 
 
@@ -432,11 +472,11 @@ def comments_html():
     if not (GISCUS["repo_id"] and GISCUS["category_id"]):
         return ""
     return (
-        '<section class="comments" aria-label="Comments"><h2>Comments</h2>'
+        f'<section class="comments" aria-label="{e(TEXT["comments"])}"><h2>{e(TEXT["comments"])}</h2>'
         f'<script src="https://giscus.app/client.js" data-repo="{e(GISCUS["repo"])}" data-repo-id="{e(GISCUS["repo_id"])}" '
         f'data-category="{e(GISCUS["category"])}" data-category-id="{e(GISCUS["category_id"])}" '
         'data-mapping="pathname" data-strict="1" data-reactions-enabled="1" data-emit-metadata="0" '
-        'data-input-position="bottom" data-theme="light" data-lang="en" '
+        f'data-input-position="bottom" data-theme="light" data-lang="{e(GISCUS["lang"])}" '
         'crossorigin="anonymous" async></script></section>'
     )
 
@@ -447,13 +487,13 @@ def render_doc(doc, crumbs, active, sections):
     if doc.kind == "html":
         raw = quote(Path(doc.src).name)
         body = (
-            f'<div class="frame-bar">{trail}<a class="frame-open" href="{raw}" target="_blank" rel="noopener">在新标签页打开</a></div>'
+            f'<div class="frame-bar">{trail}<a class="frame-open" href="{raw}" target="_blank" rel="noopener">{e(TEXT["open_new_tab"])}</a></div>'
             f'<iframe class="frame" src="{raw}" title="{e(doc.title)}"></iframe>'
         )
         emit(doc.url, doc.title, body, sections, active, body_class="frame-page")
         return
-    tags = f'<div class="tags">{tag_links(root, doc.tags)}</div>' if doc.tags else ""
-    comments = comments_html() if doc.src.startswith(f"{BLOG_SECTION}/") else ""  # 只有文章有评论，课程内容没有
+    tags = f'<div class="tags">{tag_links(root, doc)}</div>' if doc.tags else ""
+    comments = comments_html() if section_option(section_of(doc), "comments") else ""
     body = (
         f'<main class="container">{trail}<article class="doc"><header class="doc-head"><h1>{e(doc.title)}</h1>'
         f'<div class="doc-meta"><time datetime="{e(doc.date)}">{e(doc.date)}</time>{tags}</div></header>'
@@ -462,15 +502,24 @@ def render_doc(doc, crumbs, active, sections):
     emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html)
 
 
-def card(root, url, icon, title, meta):
+def card(root, url, icon, title, meta, summary=""):
+    summary = f'<span class="card-summary">{e(summary)}</span>' if summary else ""
     return (
         f'<a class="card" href="{link(root, url)}">{icon}'
-        f'<span class="card-body"><span class="card-title">{e(title)}</span>'
+        f'<span class="card-body"><span class="card-title">{e(title)}</span>{summary}'
         f'<span class="card-meta">{e(meta)}</span></span></a>'
     )
 
 
-def render_folder(folder, crumbs, active, sections, index):
+def publish_doc(doc, crumbs, active, sections, index):
+    doc.crumbs = crumbs
+    render_doc(doc, crumbs, active, sections)
+    index.append({"t": doc.title, "u": doc.url, "p": " / ".join(n for n, _ in crumbs), "g": doc.tags,
+                  "x": f"{doc.written_summary} {doc.text}".strip(), "k": "doc"})
+
+
+def render_cards(folder, crumbs, active, sections, index):
+    """卡片视图：子文件夹和文件都显示成卡片，一层层点进去。"""
     root = "../" * folder.url.count("/")
     child_crumbs = crumbs + [(folder.name, folder.url)]
     folders = []  # (排序名, 卡片 HTML)
@@ -478,37 +527,58 @@ def render_folder(folder, crumbs, active, sections, index):
     for sub in folder.subfolders:
         if sub.collapsed:
             doc = sub.docs[0]
-            docs.append((Path(sub.rel).name, card(root, doc.url, ICON_DOC, doc.title, doc.date)))
-            render_doc(doc, child_crumbs, active, sections)
-            index_doc(index, doc, child_crumbs)
+            docs.append((Path(sub.rel).name, card(root, doc.url, ICON_DOC, doc.title, doc.date, doc.written_summary)))
+            publish_doc(doc, child_crumbs, active, sections, index)
         else:
-            folders.append((Path(sub.rel).name, card(root, sub.url, ICON_FOLDER, sub.name, f"{sub.count} 项")))
-            render_folder(sub, child_crumbs, active, sections, index)
+            count = TEXT["items"][0 if sub.count == 1 else 1].format(n=sub.count)
+            folders.append((Path(sub.rel).name, card(root, sub.url, ICON_FOLDER, sub.name, count)))
+            render_cards(sub, child_crumbs, active, sections, index)
     for doc in folder.docs:
-        docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, doc.date)))
-        render_doc(doc, child_crumbs, active, sections)
-        index_doc(index, doc, child_crumbs)
+        docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, doc.date, doc.written_summary)))
+        publish_doc(doc, child_crumbs, active, sections, index)
     cards = [c for _, c in sorted(folders, key=lambda x: natural_key(x[0]))]
     cards += [c for _, c in sorted(docs, key=lambda x: natural_key(x[0]))]
-    grid = f'<div class="card-grid">{"".join(cards)}</div>' if cards else '<p class="empty">这里还没有内容。</p>'
+    grid = f'<div class="card-grid">{"".join(cards)}</div>' if cards else f'<p class="empty">{e(TEXT["empty_folder"])}</p>'
     trail = crumbs_html(root, crumbs, folder.name) if crumbs else ""
     emit(folder.url, folder.name, f'<main class="container">{trail}<h1 class="page-title">{e(folder.name)}</h1>{grid}</main>',
          sections, active)
     index.append({"t": folder.name, "u": folder.url, "p": " / ".join(n for n, _ in crumbs), "g": [], "x": "", "k": "folder"})
 
 
-def index_doc(index, doc, crumbs):
-    index.append({"t": doc.title, "u": doc.url, "p": " / ".join(n for n, _ in crumbs), "g": doc.tags,
-                  "x": doc.text, "k": "doc"})
+def newest_first(docs):
+    return sorted(docs, key=lambda d: (d.date, d.title), reverse=True)
 
 
-def render_blog(section, sections, index):
-    posts = sorted(section.all_docs(), key=lambda d: (d.date, d.title), reverse=True)
-    root = "../" * section.url.count("/")
-    crumbs = [(section.name, section.url)]
-    for post in posts:
-        render_doc(post, crumbs, section.rel, sections)
-        index_doc(index, post, crumbs)
+def category_links(root, categories):
+    links = "".join(
+        f'<a class="category" href="{link(root, url)}">{ICON_FOLDER}{e(name)}<span>{count}</span></a>'
+        for url, name, count in categories
+    )
+    return f'<nav class="categories" aria-label="{e(TEXT["categories"])}">{links}</nav>' if links else ""
+
+
+def render_list(folder, crumbs, active, sections, index):
+    """列表视图：每个文件夹一页，列出它里面所有层的文章，上方是子文件夹的入口。"""
+    child_crumbs = crumbs + [(folder.name, folder.url)]
+    subfolders = [sub for sub in folder.subfolders if not sub.collapsed]
+    direct = folder.docs + [sub.docs[0] for sub in folder.subfolders if sub.collapsed]
+    for sub in subfolders:  # 先生成子文件夹，这样下面列文章时路径已经有了
+        render_list(sub, child_crumbs, active, sections, index)
+    for doc in direct:
+        publish_doc(doc, child_crumbs, active, sections, index)
+
+    categories = [(sub.url, sub.name, sub.count) for sub in subfolders]
+    if subfolders and direct:  # 没有分类的文章放进“其他”，这样也能单独看到它们
+        other_url = f"{folder.rel}/_other/index.html"
+        categories.append((other_url, TEXT["other"], len(direct)))
+        render_list_page(other_url, TEXT["other"], child_crumbs, direct, [], active, sections)
+    render_list_page(folder.url, folder.name, crumbs, folder.all_docs(), categories, active, sections)
+    index.append({"t": folder.name, "u": folder.url, "p": " / ".join(n for n, _ in crumbs), "g": [], "x": "", "k": "folder"})
+
+
+def render_list_page(url, name, crumbs, docs, categories, active, sections):
+    root = "../" * url.count("/")
+    posts = newest_first(docs)
 
     counts = {}
     for post in posts:
@@ -519,36 +589,40 @@ def render_blog(section, sections, index):
         for tag, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
     )
     if chips:
-        chips = f'<a class="chip" href="#" data-tag="">全部<span>{len(posts)}</span></a>{chips}'
+        chips = f'<a class="chip" href="#" data-tag="">{e(TEXT["all"])}<span>{len(posts)}</span></a>{chips}'
 
     # 起止日期和日历，日历由 site.js 根据页面上的文章日期生成
     date_range = (
         '<div class="date-range" id="date-range">'
-        '<input id="date-from" type="text" placeholder="开始日期" aria-label="开始日期" autocomplete="off">'
+        f'<input id="date-from" type="text" placeholder="{e(TEXT["date_from"])}" aria-label="{e(TEXT["date_from"])}" autocomplete="off">'
         '<span class="date-sep">–</span>'
-        '<input id="date-to" type="text" placeholder="结束日期" aria-label="结束日期" autocomplete="off">'
-        '<button type="button" id="date-clear" aria-label="清除日期" hidden>×</button>'
+        f'<input id="date-to" type="text" placeholder="{e(TEXT["date_to"])}" aria-label="{e(TEXT["date_to"])}" autocomplete="off">'
+        f'<button type="button" id="date-clear" aria-label="{e(TEXT["date_clear"])}" hidden>×</button>'
         '<div class="calendar" id="date-calendar" hidden></div></div>'
     )
     filters = f'<div class="filters">{chips}{date_range}</div>' if posts else ""
     if posts:
-        content = post_list(root, posts) + '<p id="no-match" class="empty" hidden>没有符合条件的文章。</p>'
+        content = post_list(root, posts, len(crumbs) + 1) + f'<p id="no-match" class="empty" hidden>{e(TEXT["no_match"])}</p>'
     else:
-        content = '<p class="empty">还没有文章。</p>'
-    emit(section.url, section.name,
-         f'<main class="container"><h1 class="page-title">{e(section.name)}</h1>{filters}{content}</main>',
-         sections, section.rel)
-    return posts
+        content = f'<p class="empty">{e(TEXT["no_posts"])}</p>'
+    trail = crumbs_html(root, crumbs, name) if crumbs else ""
+    emit(url, name,
+         f'<main class="container">{trail}<h1 class="page-title">{e(name)}</h1>'
+         f'{category_links(root, categories)}{filters}{content}</main>',
+         sections, active)
 
 
-def render_home(posts, blog, sections):
-    recent = post_list("", posts[:RECENT_POSTS]) if posts else '<p class="empty">还没有文章。</p>'
-    more = f'<p class="more"><a href="{link("", blog.url)}">全部{e(blog.name)} →</a></p>' if blog and len(posts) > RECENT_POSTS else ""
-    body = (
-        f'<main class="container"><div class="intro"><h1>{e(SITE_TITLE)}</h1><p>{e(SITE_DESCRIPTION)}</p></div>'
-        f'<h2 class="section-title">最近的文章</h2>{recent}{more}</main>'
-    )
-    emit("index.html", SITE_TITLE, body, sections)
+def render_home(sections):
+    intro = f'<div class="intro"><h1>{e(SITE_TITLE)}</h1><p>{e(SITE_DESCRIPTION)}</p></div>'
+    home_sections = [s for s in sections if section_option(s.rel, "home")]
+    recent = ""
+    if home_sections:
+        posts = newest_first(doc for s in home_sections for doc in s.all_docs())
+        items = post_list("", posts[:RECENT_POSTS], 1) if posts else f'<p class="empty">{e(TEXT["no_posts"])}</p>'
+        more = "".join(f'<p class="more"><a href="{link("", s.url)}">{e(TEXT["all_in"].format(name=s.name))}</a></p>'
+                       for s in home_sections) if len(posts) > RECENT_POSTS else ""
+        recent = f'<h2 class="section-title">{e(TEXT["recent"])}</h2>{items}{more}'
+    emit("index.html", SITE_TITLE, f'<main class="container">{intro}{recent}</main>', sections)
 
 
 # ---------- 入口 ----------
@@ -558,22 +632,22 @@ def build():
     for child in SITE.iterdir():
         shutil.rmtree(child) if child.is_dir() else child.unlink()
     (SITE / "_assets").mkdir()
-    shutil.copy2(THEME / "site.js", SITE / "_assets" / "site.js")
+    text = json.dumps(TEXT, ensure_ascii=False)
+    (SITE / "_assets" / "site.js").write_text(f"window.SITE_TEXT={text};\n" + read_text(THEME / "site.js"), encoding="utf-8")
     code_css = HtmlFormatter(style="default").get_style_defs("pre")
     (SITE / "_assets" / "style.css").write_text(read_text(THEME / "style.css") + "\n" + code_css, encoding="utf-8")
 
-    dirs = sorted((p for p in ROOT.iterdir() if p.is_dir() and not ignored(p)), key=lambda p: natural_key(p.name))
+    dirs = [p for p in ROOT.iterdir() if p.is_dir() and not ignored(p)]
+    check_sections(dirs)
+    order = list(SECTIONS)  # 配置里写的栏目按写的顺序排在前面，其余的按文件夹名排在后面
+    dirs.sort(key=lambda p: (order.index(p.name) if p.name in order else len(order), natural_key(p.name)))
     sections = [scan(p) for p in dirs]
     index = []
-    posts, blog = [], None
     for section in sections:
         copy_files(section.rel)
-        if section.rel == BLOG_SECTION:
-            blog = section
-            posts = render_blog(section, sections, index)
-        else:
-            render_folder(section, [], section.rel, sections, index)
-    render_home(posts, blog, sections)
+        render = render_list if section_option(section.rel, "view") == "list" else render_cards
+        render(section, [], section.rel, sections, index)
+    render_home(sections)
 
     data = json.dumps(index, ensure_ascii=False, separators=(",", ":"))
     (SITE / "_assets" / "search-index.js").write_text(f"window.SEARCH_INDEX={data};", encoding="utf-8")
