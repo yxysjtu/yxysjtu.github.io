@@ -2,6 +2,7 @@
 
 SITE_TITLE = "yu"
 SITE_DESCRIPTION = "致力于折腾好玩的东西"
+SITE_URL = "https://yxysjtu.github.io"  # 网站地址，分享卡片的链接和图片要用完整地址；留空就不加图片和链接
 LANGUAGE = "en"  # 界面文字的语言："zh" 或 "en"，文字在 i18n.py 里
 
 # 栏目：根目录下每个第一级文件夹都是导航栏的一项，导航栏按这里写的顺序排列。

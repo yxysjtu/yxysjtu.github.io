@@ -35,6 +35,8 @@ from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
 from config import GISCUS, LABELS, LANGUAGE, RECENT_POSTS, SECTIONS, SITE_DESCRIPTION, SITE_TITLE, SUMMARY_LENGTH
+import config  # noqa: E402
+SITE_URL = getattr(config, "SITE_URL", "")  # 旧的 config.py 没有这一项时不出错
 from i18n import LANGUAGES
 
 if LANGUAGE not in LANGUAGES:
@@ -543,7 +545,37 @@ def copy_files(section, skip=frozenset()):
 
 
 # ---------- 页面模板 ----------
-def emit(url, title, body, sections, active=None, math=False, body_class=""):
+def absolute_url(path):
+    """分享卡片里的地址必须是完整网址。path 是相对根目录的路径，也可以本来就是网址。"""
+    if external_url(path):
+        return "https:" + path if path.startswith("//") else path
+    return f"{SITE_URL.rstrip('/')}/{quote(path)}" if SITE_URL else ""
+
+
+def share_meta(title, url, doc=None):
+    """分享到社交平台时显示的标题、摘要和图片（Open Graph 和 Twitter 卡片）。"""
+    description = (doc.summary if doc else "") or SITE_DESCRIPTION
+    tags = [("name", "description", description), ("property", "og:site_name", SITE_TITLE),
+            ("property", "og:title", title), ("property", "og:description", description),
+            ("property", "og:type", "article" if doc else "website")]
+    page = absolute_url(url)
+    if page:
+        tags.append(("property", "og:url", page))
+    # 大多数平台不支持 SVG 当分享图
+    image = absolute_url(doc.cover) if doc and doc.cover and not doc.cover.lower().endswith(".svg") else ""
+    if image:
+        tags += [("property", "og:image", image), ("property", "og:image:alt", title)]
+    tags.append(("name", "twitter:card", "summary_large_image" if image else "summary"))
+    if doc:
+        tags.append(("property", "article:published_time", doc.date))
+        if doc.updated > doc.date:
+            tags.append(("property", "article:modified_time", doc.updated))
+        tags += [("property", "article:tag", tag) for tag in doc.tags]
+    head = "\n".join(f'<meta {kind}="{key}" content="{e(value)}">' for kind, key, value in tags)
+    return head + (f'\n<link rel="canonical" href="{e(page)}">' if page else "")
+
+
+def emit(url, title, body, sections, active=None, math=False, body_class="", doc=None):
     root = "../" * url.count("/")
     nav = "".join(
         f'<a href="{link(root, s.url)}"{" class=active aria-current=page" if s.rel == active else ""}>{e(s.name)}</a>'
@@ -561,7 +593,7 @@ def emit(url, title, body, sections, active=None, math=False, body_class=""):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{e(page_title)}</title>
-<meta name="description" content="{e(SITE_DESCRIPTION)}">
+{share_meta(title, url, doc)}
 <link rel="stylesheet" href="{root}_assets/style.css?v={ASSET_VERSION}">
 {katex}
 <script defer src="{root}_assets/site.js?v={ASSET_VERSION}" data-root="{root}"></script>
@@ -699,7 +731,7 @@ def render_doc(doc, crumbs, active, sections):
         f'<div class="doc-meta"><time datetime="{e(doc.date)}">{e(doc.date)}</time>{updated}{tags}</div></header>'
         f'{toc_html(doc.html)}<div class="prose">{doc.html}</div></article>{comments}</main>'
     )
-    emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html)
+    emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html, doc=doc)
 
 
 def card(root, url, icon, title, meta, summary=""):
