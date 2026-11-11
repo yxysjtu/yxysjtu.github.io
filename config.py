@@ -13,7 +13,8 @@ LANGUAGE = "en"  # 界面文字的语言："zh" 或 "en"，文字在 i18n.py 里
 SECTIONS = {
     "articles": {"view": "list", "comments": True, "home": True},
     "courses": {"view": "cards"},
-    "projects": {"view": "cards", "comments": True}
+    "projects": {"view": "cards", "comments": True},
+    "life": {"view": "list"}
 }
 
 RECENT_POSTS = 10  # 主页显示几篇最近的文章
@@ -26,6 +27,7 @@ LABELS = {
     "projects": "项目",
     "notes": "笔记",
     "experiments": "实验",
+    "life": "生活",
 }
 
 # 评论和表情回应，存在 GitHub Discussions 里。开通方法见 README；两个 ID 没填时不显示评论区

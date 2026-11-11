@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """读取内容文件夹，生成整个网站到 _site/。用法：python build.py
 
+本机构建包含所有页面。GitHub 上构建，或者运行 python build.py --public 时，不包含写了 visibility: private 的页面。
+
 约定：
 - 根目录下每个第一级文件夹就是导航栏的一项（以 . 或 _ 开头的文件夹除外）。
 - 每个栏目用列表视图还是卡片视图，以及其他配置项，都在 config.py 里。
@@ -10,14 +12,16 @@ import json
 import os
 import re
 import shutil
+import posixpath
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import date
 from html import escape as e, unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import yaml
 from markdown_it import MarkdownIt
@@ -39,6 +43,9 @@ TEXT = LANGUAGES[LANGUAGE]
 
 SECTION_DEFAULTS = {"view": "cards", "comments": False, "home": False}
 VIEWS = ("list", "cards")
+VISIBILITIES = ("public", "private")
+# GitHub Actions 会自动设置这个环境变量，所以不用改 deploy.yml，也不会忘记加参数
+PUBLIC_BUILD = "--public" in sys.argv[1:] or os.environ.get("GITHUB_ACTIONS") == "true"
 
 ROOT = Path(__file__).resolve().parent
 SITE = ROOT / "_site"
@@ -64,6 +71,8 @@ class Doc:
     kind: str  # "md" 或 "html"
     title: str
     date: str
+    cover: str = ""  # 列表里的缩略图：相对根目录的路径，或者 https:// 开头的网址
+    updated: str = ""  # 最后修改日期，比 date 晚时在文章里显示“更新于”
     tags: list = field(default_factory=list)
     summary: str = ""  # 列表上显示：手写的，没写就自动生成
     written_summary: str = ""  # 卡片上显示：只有手写的，这样卡片可以不带描述
@@ -71,6 +80,7 @@ class Doc:
     text: str = ""
     sort_name: str = ""
     crumbs: list = field(default_factory=list)  # 从栏目到所在文件夹的路径 [(显示名, 网址), ...]
+    private: bool = False  # visibility: private，只有本机构建时才有这个页面
 
 
 @dataclass
@@ -147,16 +157,35 @@ def read_text(path):
 
 
 def doc_date(path, declared=None):
-    """日期取 frontmatter 的 date，没写就取最后修改日期。
+    """日期取 frontmatter 的 date，没写就取创建日期，之后再修改也不会变。
 
-    不能只看文件修改时间：GitHub 构建时文件是刚下载的，修改时间都是构建当天。
-    所以已提交且没再改动的文件用最后一次提交的日期，其余情况才用文件修改时间。
+    不能看文件本身的时间：GitHub 构建时文件是刚下载的，时间都是构建当天。
+    所以提交过的文件用第一次提交它的日期（改名、移动也会追溯回去），
+    还没提交过的新文件才用文件的创建时间。
     """
     if declared:
         # 统一补零，否则 2026-11-5 这样的写法会排错顺序
         match = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", str(declared))
         return "{}-{:0>2}-{:0>2}".format(*match.groups()) if match else str(declared)[:10]
 
+    def git(*args):
+        return subprocess.run(["git", *args, "--", str(path)], cwd=ROOT, capture_output=True,
+                              text=True, encoding="utf-8").stdout.strip()
+
+    try:
+        added = git("log", "--diff-filter=A", "--follow", "--format=%as")
+        if added:
+            return added.splitlines()[-1]  # 从新到旧排列，最后一行是第一次提交
+    except OSError:  # 没有安装 git
+        pass
+    stat = path.stat()
+    # Windows 上 st_ctime 就是创建时间；别的系统没有创建时间时，退回修改时间
+    created = getattr(stat, "st_birthtime", None) or (stat.st_ctime if os.name == "nt" else stat.st_mtime)
+    return date.fromtimestamp(created).isoformat()
+
+
+def modified_date(path):
+    """最后修改日期：提交后没再改过的文件取最后一次提交的日期，有没提交的改动时取文件修改时间。"""
     def git(*args):
         return subprocess.run(["git", *args, "--", str(path)], cwd=ROOT, capture_output=True,
                               text=True, encoding="utf-8").stdout.strip()
@@ -255,6 +284,32 @@ def parse_frontmatter(source, path):
     return meta, source[match.end():]
 
 
+def external_url(url):
+    return re.match(r"(?:https?:)?//|data:image/", url, re.I)
+
+
+def find_cover(meta, html, rel):
+    """列表缩略图：frontmatter 的 cover，没写就取正文第一张图；cover: none 表示不要。"""
+    declared = meta.get("cover")
+    if declared is False or (declared is not None and str(declared).strip().lower() in ("none", "false", "no")):
+        return ""
+    if declared:
+        src = str(declared).strip()
+    else:
+        first = re.search(r"""<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']""", html, re.I)
+        if not first:
+            return ""
+        src = unescape(first.group(1))
+    if external_url(src):
+        return src
+    path = unquote(re.split(r"[#?]", src, maxsplit=1)[0])
+    cover = posixpath.normpath(path.lstrip("/") if path.startswith("/") else posixpath.join(posixpath.dirname(rel), path))
+    if not (ROOT / cover).is_file():
+        print(f"提醒：{rel} 的缩略图 {src} 找不到，列表里不显示图片")
+        return ""
+    return cover
+
+
 def parse_tags(value):
     if not value:
         return []
@@ -281,8 +336,17 @@ def excerpt(html):
     return ""
 
 
+def read_private(meta, rel):
+    """写错时停止构建。如果当成默认的公开，一个拼写错误就会把不想发布的页面发布出去。"""
+    value = str(meta.get("visibility", "public")).strip().lower()
+    if value not in VISIBILITIES:
+        raise SystemExit(f"{rel}: visibility 只能是 {' 或 '.join(VISIBILITIES)}，现在写的是 {meta['visibility']!r}")
+    return value == "private"
+
+
 def load_markdown(path, rel):
     meta, body = parse_frontmatter(read_text(path), rel)
+    private = read_private(meta, rel)
     html = MD.render(body)
     heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", html, re.S)
     if heading and not html[:heading.start()].strip():  # 页面已经显示标题，开头的一级标题不再重复
@@ -297,12 +361,15 @@ def load_markdown(path, rel):
         kind="md",
         title=str(meta.get("title") or (heading and plain_text(heading.group(1))) or prettify(path.stem)),
         date=doc_date(path, meta.get("date")),
+        updated=modified_date(path),
+        cover=find_cover(meta, html, rel),
         tags=parse_tags(meta.get("tags")),
         summary=written_summary or excerpt(html),
         written_summary=written_summary,
         html=html,
         text=plain_text(html),
         sort_name=path.name,
+        private=private,
     )
 
 
@@ -355,8 +422,37 @@ def scan(path):
     return folder
 
 
-def copy_files(section):
-    """除 Markdown 外的文件原样复制（实验 HTML、图片等），保持相对路径不变。"""
+def remove_private(folder):
+    """把私有页面从文件夹里去掉，返回去掉的页面。只装着私有页面的文件夹也不显示。"""
+    removed = [doc for doc in folder.docs if doc.private]
+    folder.docs = [doc for doc in folder.docs if not doc.private]
+    kept = []
+    for sub in folder.subfolders:
+        had_docs = sub.count > 0
+        removed += remove_private(sub)
+        if sub.count or not had_docs:
+            kept.append(sub)
+    folder.subfolders = kept
+    return removed
+
+
+def local_references(doc):
+    """页面里用到的本地文件（图片、链接），是相对根目录的路径。"""
+    source = doc.html if doc.kind == "md" else read_text(ROOT / doc.src)
+    references = {doc.src} if doc.kind == "html" else set()  # HTML 页面要靠原文件显示，私有页面链接到它时也要留着
+    for target in re.findall(r"""\b(?:src|href)\s*=\s*["']([^"']+)["']""", source, re.I):
+        if re.match(r"[a-z][a-z0-9+.-]*:|#|/", target, re.I):
+            continue
+        path = unquote(re.split(r"[#?]", target, maxsplit=1)[0])
+        if path:
+            references.add(posixpath.normpath(posixpath.join(posixpath.dirname(doc.src), path)))
+    if doc.cover and not external_url(doc.cover):
+        references.add(doc.cover)  # frontmatter 里指定的缩略图不在正文里，也要算上
+    return references
+
+
+def copy_files(section, skip=frozenset()):
+    """除 Markdown 外的文件原样复制（实验 HTML、图片等），保持相对路径不变。skip 里的文件不复制。"""
     for dirpath, dirnames, filenames in os.walk(ROOT / section):
         # 修改点 1：只过滤 . 开头的文件夹，允许 os.walk 进入 _ 开头的文件夹（如 _images）
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
@@ -370,6 +466,9 @@ def copy_files(section):
                 continue
             # ==========================
             
+            if src.relative_to(ROOT).as_posix() in skip:
+                continue
+
             dst = SITE / src.relative_to(ROOT)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -442,17 +541,46 @@ def post_list(root, posts, depth):
         summary = f"<p>{e(post.summary)}</p>" if post.summary else ""
         path = " / ".join(f'<a href="{link(root, url)}">{e(name)}</a>' for name, url in post.crumbs[depth:])
         path = f'<span class="post-path">{path}</span>' if path else ""
+        cover = ""
+        if post.cover:
+            src = post.cover if external_url(post.cover) else link(root, post.cover)
+            # 标题已经是链接，图片链接对读屏和键盘是重复的，所以不进 Tab 顺序
+            cover = (f'<a class="post-cover" href="{link(root, post.url)}" tabindex="-1" aria-hidden="true">'
+                     f'<img src="{e(src)}" alt="" loading="lazy" decoding="async"></a>')
         items.append(
-            f'<article class="post" data-tags="{e(json.dumps(post.tags, ensure_ascii=False))}">'
-            f'<div class="post-meta"><time datetime="{e(post.date)}">{e(post.date)}</time>{path}</div>'
-            f'<h2><a href="{link(root, post.url)}">{e(post.title)}</a></h2>{summary}{tags}</article>'
+            f'<article class="post{" has-cover" if cover else ""}" data-tags="{e(json.dumps(post.tags, ensure_ascii=False))}">'
+            f'<div class="post-body"><div class="post-meta"><time datetime="{e(post.date)}">{e(post.date)}</time>{path}</div>'
+            f'<h2><a href="{link(root, post.url)}">{e(post.title)}</a></h2>{summary}{tags}</div>{cover}</article>'
         )
     return f'<div class="post-list">{"".join(items)}</div>'
 
 
+def folded_ranges(html):
+    """默认折叠的 <details> 覆盖的范围。写了 open 的默认展开，不算；它在折叠的 <details> 里面时仍然看不到。
+    没写结束标签时一直到文末。"""
+    ranges = []
+    stack = []  # 每一层 <details> 是不是默认折叠
+    start = 0
+    for tag in re.finditer(r"<(/?)details\b([^>]*)>", html, re.I):
+        if not tag.group(1):
+            folded = not re.search(r"\bopen\b", tag.group(2), re.I)
+            if folded and not any(stack):
+                start = tag.start()
+            stack.append(folded)
+        elif stack:
+            if stack.pop() and not any(stack):
+                ranges.append((start, tag.end()))
+    if any(stack):
+        ranges.append((start, len(html)))
+    return ranges
+
+
 def toc_html(html):
-    """用正文的一到三级标题生成目录；标题少于 2 个时不显示。宽屏和窄屏各用一份，由 CSS 切换。"""
-    headings = re.findall(r'<h([1-3]) id="([^"]+)">(.*?)</h\1>', html, re.S)
+    """用正文的一到三级标题生成目录；标题少于 2 个时不显示。宽屏和窄屏各用一份，由 CSS 切换。
+    折叠在 <details> 里的标题平时看不到，点了目录也跳不过去，所以不放进目录。"""
+    folded = folded_ranges(html)
+    headings = [match.groups() for match in re.finditer(r'<h([1-3]) id="([^"]+)">(.*?)</h\1>', html, re.S)
+                if not any(start <= match.start() < end for start, end in folded)]
     if len(headings) < 2:
         return ""
     top = min(int(level) for level, _, _ in headings)
@@ -493,10 +621,14 @@ def render_doc(doc, crumbs, active, sections):
         emit(doc.url, doc.title, body, sections, active, body_class="frame-page")
         return
     tags = f'<div class="tags">{tag_links(root, doc)}</div>' if doc.tags else ""
+    updated = ""
+    if doc.updated > doc.date:  # 都是 YYYY-MM-DD，可以直接比较
+        stamp = f'<time datetime="{e(doc.updated)}">{e(doc.updated)}</time>'
+        updated = f'<span class="doc-updated">{TEXT["updated"].format(date=stamp)}</span>'
     comments = comments_html() if section_option(section_of(doc), "comments") else ""
     body = (
         f'<main class="container">{trail}<article class="doc"><header class="doc-head"><h1>{e(doc.title)}</h1>'
-        f'<div class="doc-meta"><time datetime="{e(doc.date)}">{e(doc.date)}</time>{tags}</div></header>'
+        f'<div class="doc-meta"><time datetime="{e(doc.date)}">{e(doc.date)}</time>{updated}{tags}</div></header>'
         f'{toc_html(doc.html)}<div class="prose">{doc.html}</div></article>{comments}</main>'
     )
     emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html)
@@ -642,9 +774,21 @@ def build():
     order = list(SECTIONS)  # 配置里写的栏目按写的顺序排在前面，其余的按文件夹名排在后面
     dirs.sort(key=lambda p: (order.index(p.name) if p.name in order else len(order), natural_key(p.name)))
     sections = [scan(p) for p in dirs]
+    private_docs = []
+    private_files = set()
+    if PUBLIC_BUILD:
+        private_docs = [doc for section in sections for doc in remove_private(section)]
+        public_references = set().union(*(local_references(doc) for section in sections for doc in section.all_docs()))
+        # 只有私有页面用到的图片也不能发布。公开页面也用到的要留着
+        private_files = set().union(*(local_references(doc) for doc in private_docs)) - public_references
+        for url in sorted(public_references & {doc.url for doc in private_docs}):
+            print(f"提醒：有公开的页面链接到了私有页面 {url}，发布后这个链接会打不开")
+    else:
+        for doc in (doc for section in sections for doc in section.all_docs() if doc.private):
+            print(f"私有页面，不会发布到 GitHub：{doc.src}")
     index = []
     for section in sections:
-        copy_files(section.rel)
+        copy_files(section.rel, private_files)
         render = render_list if section_option(section.rel, "view") == "list" else render_cards
         render(section, [], section.rel, sections, index)
     render_home(sections)
@@ -652,7 +796,8 @@ def build():
     data = json.dumps(index, ensure_ascii=False, separators=(",", ":"))
     (SITE / "_assets" / "search-index.js").write_text(f"window.SEARCH_INDEX={data};", encoding="utf-8")
     pages = sum(s.count for s in sections)
-    print(f"完成：{len(sections)} 个栏目，{pages} 篇内容，输出到 {SITE}")
+    skipped = f"，跳过 {len(private_docs)} 篇私有页面" if PUBLIC_BUILD else ""
+    print(f"完成：{len(sections)} 个栏目，{pages} 篇内容{skipped}，输出到 {SITE}")
 
 
 if __name__ == "__main__":
