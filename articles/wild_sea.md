@@ -1,15 +1,18 @@
 ---
-tags: [纪录片]
+tags: [Documentary]
 ---
 
 # Wild Sea
+>Reconnecting with Oneself Through Sea Kayaking
+
 
 ![](_images/image-20261111-192517.png)
 
-Reconnecting with Oneself Through Sea Kayaking
+@[youtube](https://www.youtube.com/watch?v=C66xpMMc3pQ&t=53s)
 
 
-[video](https://www.youtube.com/watch?v=C66xpMMc3pQ&t=53s)
+
+
 
 ## 1. The Ocean as My Home — 海洋是我的家
 
