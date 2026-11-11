@@ -21,7 +21,7 @@ from datetime import date
 from html import escape as e, unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 import yaml
 from markdown_it import MarkdownIt
@@ -262,6 +262,72 @@ def strip_quote_markers(state):
             token.content = re.sub(rf"^[ \t]*(?:>[ \t]?){{1,{depth}}}", "", token.content, flags=re.M)
 
 
+# ---------- 视频 ----------
+# 单独一行写 @[youtube](视频ID或链接) 或 @[bilibili](BV号或链接)，可以在后面加 "标题"
+VIDEO_LINE = re.compile(r'@\[(youtube|bilibili)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)\s*$', re.I)
+VIDEO_TITLES = {"youtube": "YouTube 视频", "bilibili": "哔哩哔哩视频"}
+
+
+def start_seconds(query):
+    """链接里的开始时间：t=90、t=1m30s、start=90，都换成秒。"""
+    params = parse_qs(query)
+    value = (params.get("t") or params.get("start") or [""])[0]
+    match = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?", value)
+    if not match or not value:
+        return 0
+    hours, minutes, seconds = (int(x or 0) for x in match.groups())
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def video_url(provider, target):
+    """把视频 ID 或网页链接换成嵌入播放器的地址，认不出时返回空字符串。"""
+    if provider == "youtube":
+        match = re.match(r"(?:https?://)?(?:www\.|m\.)?(?:youtube(?:-nocookie)?\.com/(?:watch\?(?:[^#]*&)?v=|embed/|shorts/|live/)|youtu\.be/)?"
+                         r"([A-Za-z0-9_-]{11})(?:[?&#](.*))?$", target)
+        if not match:
+            return ""
+        start = start_seconds((match.group(2) or "").replace("#", "&"))
+        # youtube-nocookie：不点播放就不设置跟踪 cookie
+        return f"https://www.youtube-nocookie.com/embed/{match.group(1)}" + (f"?start={start}" if start else "")
+    match = re.match(r"(?:https?://)?(?:www\.|m\.)?(?:bilibili\.com/video/)?(BV[A-Za-z0-9]{10})/?(?:\?(.*))?$", target)
+    if not match:
+        return ""
+    params = parse_qs(match.group(2) or "")
+    url = f"https://player.bilibili.com/player.html?bvid={match.group(1)}&autoplay=0"
+    page = (params.get("p") or ["1"])[0]
+    if page.isdigit() and page != "1":
+        url += f"&p={page}"
+    start = start_seconds(match.group(2) or "")
+    return url + (f"&t={start}" if start else "")
+
+
+def video_block(state, start, end, silent):
+    if state.sCount[start] - state.blkIndent >= 4:  # 缩进四格是代码块
+        return False
+    line = state.src[state.bMarks[start] + state.tShift[start]:state.eMarks[start]]
+    match = VIDEO_LINE.match(line)
+    if not match:
+        return False
+    provider = match.group(1).lower()
+    url = video_url(provider, match.group(2))
+    if not url:
+        return False  # 认不出的 ID 原样显示成文字，作者能看出写错了
+    if silent:
+        return True
+    token = state.push("video", "", 0)
+    token.map = [start, start + 1]
+    token.meta = {"url": url, "title": match.group(3) or VIDEO_TITLES[provider]}
+    state.line = start + 1
+    return True
+
+
+def render_video(self, tokens, idx, options, env):
+    meta = tokens[idx].meta
+    return (f'<div class="video"><iframe src="{e(meta["url"])}" title="{e(meta["title"])}" loading="lazy" '
+            'allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen '
+            'referrerpolicy="strict-origin-when-cross-origin"></iframe></div>\n')
+
+
 MD = (
     MarkdownIt("commonmark", {"html": True, "highlight": highlight_code})
     .enable(["table", "strikethrough"])
@@ -271,6 +337,8 @@ MD = (
     .use(anchors_plugin, max_level=4)
 )
 MD.core.ruler.push("strip_quote_markers", strip_quote_markers)
+MD.block.ruler.before("paragraph", "video", video_block, {"alt": ["paragraph"]})
+MD.add_render_rule("video", render_video)
 
 
 def parse_frontmatter(source, path):
