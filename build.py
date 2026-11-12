@@ -416,7 +416,18 @@ def load_markdown(path, rel):
     private = read_private(meta, rel)
     template = {}
     heading = None
+    first_heading = ""  # 用模板时从正文拿出来当标题的第一个一级标题
     if meta.get("template"):  # 和编辑器一样按模板渲染：编号、图题、交叉引用、模板样式
+        title_line = None
+        if not meta.get("title"):
+            # 第一行是标题，而且全文最高一级的标题只有它一个时，它就是文章标题：放进页面标题栏，
+            # 不在正文里编成第 1 章，编号从下一级开始。最高一级有好几个标题的笔记，它们是真正的章，照常编号
+            without_code = re.sub(r"^(```|~~~).*?^\1", "", body, flags=re.S | re.M)
+            levels = [len(m) for m in re.findall(r"^(#{1,6})[ \t]+\S", without_code, re.M)]
+            top = re.match(r"\s*^(#{1,6})[ \t]+(.+?)[ \t]*(?:\{[^}]*\})?[ \t]*$\n?", body, re.M)
+            if top and len(top.group(1)) == min(levels) and levels.count(min(levels)) == 1:
+                title_line = top.group(2).strip()
+                body = body[top.end():]
         html, template, problems = doc_render.render_body(meta, body, {}, str(ROOT), rel)
         for problem in problems:
             print(f"提醒：{rel} 的模板：{problem}")
@@ -424,9 +435,9 @@ def load_markdown(path, rel):
             # 没写 title 时页面标题栏照常显示标题和日期，模板开头的题目块就只剩日期，重复了，去掉
             html = re.sub(r'<p class="doc-date">.*?</p>', "", html, count=1, flags=re.S)
             html = re.sub(r'<header class="front-matter">\s*</header>\s*', "", html, count=1)
-        # 标题取第一个一级标题的文字（不带编号），但正文里留着它：模板会把它编成第 1 章
-        first = re.search(r'<h1\b[^>]*>(?:<span class="heading-number">[^<]*</span>\s*)?(.*?)</h1>', html, re.S)
-        heading = first  # 只在 frontmatter 没写 title 时用
+        if title_line:
+            first_heading = plain_text(MD.renderInline(title_line))
+        # 否则标题用文件名：好几章的笔记，第一章的名字不是整篇的名字
     else:
         html = MD.render(body)
         heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", html, re.S)
@@ -440,7 +451,7 @@ def load_markdown(path, rel):
         src=rel,
         url=str(Path(rel).with_suffix(".html").as_posix()),
         kind="md",
-        title=str(meta.get("title") or (heading and plain_text(heading.group(1))) or prettify(path.stem)),
+        title=str(meta.get("title") or first_heading or (heading and plain_text(heading.group(1))) or prettify(path.stem)),
         date=doc_date(path, meta.get("date")),
         updated=modified_date(path),
         cover=find_cover(meta, html, rel),
