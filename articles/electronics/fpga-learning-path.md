@@ -232,7 +232,7 @@ source:
 
 * JESD204B协议结构（Subclass 0/1/2）
 * Lane、Octet、Multiframe、Frame结构
-* \*\*码组同步（CGS）**与**帧同步（ILAS）\*\*流程
+* **码组同步（CGS）与帧同步（ILAS）**流程
 * **8B/10B或64B/66B编码原理**
 * FPGA中的**GTX/GTH SERDES硬核**使用
 * **JESD204B IP核配置与测试**
