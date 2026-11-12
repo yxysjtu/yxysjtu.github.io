@@ -301,7 +301,7 @@ def plain_text(html):
 # 渲染规则和模板都和 Markdown 编辑器共用，在编辑器仓库里，这样编辑器预览和网站显示一致。
 # 博客仓库的 _render/ 里放一份副本，GitHub 上构建时用它。
 RENDER = ROOT / "_render"
-RENDER_FILES = ["md_render.py", "doc_render.py", "numbered.py", "template_loader.py", "template_style.py", "paths.py"]
+RENDER_FILES = ["md_render.py", "emoji_names.py", "doc_render.py", "numbered.py", "template_loader.py", "template_style.py", "paths.py"]
 
 
 def sync_renderer():
