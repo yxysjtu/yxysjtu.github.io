@@ -29,6 +29,7 @@ from pygments.formatters import HtmlFormatter
 from config import GISCUS, LABELS, LANGUAGE, RECENT_POSTS, SECTIONS, SITE_DESCRIPTION, SITE_TITLE, SUMMARY_LENGTH
 import config  # noqa: E402
 SITE_URL = getattr(config, "SITE_URL", "")  # 旧的 config.py 没有这一项时不出错
+REDIRECTS = getattr(config, "REDIRECTS", {})  # 旧网址 -> 新网址
 VISIBLE_TAGS = getattr(config, "VISIBLE_TAGS", 10)  # 列表页标签栏默认显示几个标签
 from i18n import LANGUAGES
 
@@ -817,6 +818,31 @@ def render_home(sections):
 
 
 # ---------- 入口 ----------
+def write_redirects():
+    """文章搬家后，旧网址放一个跳转页，以前分享出去的链接还能打开。对应关系写在 config.py 的 REDIRECTS 里。"""
+    for old, new in REDIRECTS.items():
+        old, new = old.strip("/"), new.strip("/")
+        source = SITE / old
+        if source.exists():  # 旧网址又有了真正的页面，就不该再跳转
+            print(f"提醒：REDIRECTS 里的 {old} 现在是一个真实页面，不生成跳转")
+            continue
+        if not (SITE / new).exists():
+            print(f"提醒：REDIRECTS 里 {old} 要跳转到的 {new} 不存在")
+        target = posixpath.relpath(new, posixpath.dirname(old) or ".")
+        absolute = absolute_url(new)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            '<!DOCTYPE html>\n<html><head><meta charset="utf-8">'
+            f'<title>{e(TEXT["moved"])}</title>'
+            f'<meta http-equiv="refresh" content="0; url={e(quote(target))}">'
+            + (f'<link rel="canonical" href="{e(absolute)}">' if absolute else "")
+            + '<meta name="robots" content="noindex">'
+            # 带上 #后面的部分，跳到原来的段落
+            + f'<script>location.replace({json.dumps(quote(target))} + location.hash)</script>'
+            f'</head><body><p><a href="{e(quote(target))}">{e(TEXT["moved"])}</a></p></body></html>\n',
+            encoding="utf-8")
+
+
 def build():
     # 只清空内容、不删目录本身：Windows 上如果有终端或预览服务停在 _site 里，删目录会失败
     SITE.mkdir(exist_ok=True)
@@ -854,6 +880,7 @@ def build():
 
     data = json.dumps(index, ensure_ascii=False, separators=(",", ":"))
     (SITE / "_assets" / "search-index.js").write_text(f"window.SEARCH_INDEX={data};", encoding="utf-8")
+    write_redirects()
     pages = sum(s.count for s in sections)
     skipped = f"，跳过 {len(private_docs)} 篇私有页面" if PUBLIC_BUILD else ""
     print(f"完成：{len(sections)} 个栏目，{pages} 篇内容{skipped}，输出到 {SITE}")

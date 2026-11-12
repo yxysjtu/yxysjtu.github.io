@@ -22,6 +22,13 @@ SECTIONS = {
 }
 
 RECENT_POSTS = 10  # 主页显示几篇最近的文章
+# 文章换了文件夹或改了名字后，旧网址跳转到新网址，以前分享出去的链接还能打开。
+# 写生成后的网址（相对网站根目录，.md 换成 .html）
+REDIRECTS = {
+    "articles/wild_sea.html": "articles/reflections/wild_sea.html",
+    "articles/the_frozen_road.html": "articles/reflections/the_frozen_road.html",
+    "articles/winter_in_sweden.html": "articles/reflections/winter_in_sweden.html",
+}
 VISIBLE_TAGS = 10  # 列表页的标签栏默认显示文章最多的前几个标签，其余点“+N”展开
 SUMMARY_LENGTH = 120  # 自动摘要（第一段）超过多少字就截断并加 ...
 
