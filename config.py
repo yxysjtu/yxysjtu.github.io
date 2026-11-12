@@ -14,9 +14,10 @@ LANGUAGE = "en"  # 界面文字的语言："zh" 或 "en"，文字在 i18n.py 里
 #             "cards" 卡片视图（默认）：把子文件夹和文件显示成卡片，一层层点进去
 #   comments  True 表示这个栏目的文章有评论区（默认 False，还需要填好下面的 GISCUS）
 #   home      True 表示这个栏目最新的文章显示在主页（默认 False）
+#   folder_sort  文件夹的顺序："name" 按名字（默认）；"updated" 里面最近修改过的文件夹排前面
 SECTIONS = {
     "articles": {"view": "list", "comments": True, "home": True},
-    "courses": {"view": "cards"},
+    "courses": {"view": "cards", "folder_sort": "updated"},
     "projects": {"view": "cards", "comments": True},
     "life": {"view": "list"}
 }

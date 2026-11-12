@@ -37,8 +37,9 @@ if LANGUAGE not in LANGUAGES:
     raise SystemExit(f"config.py：LANGUAGE 只能是 {' 或 '.join(LANGUAGES)}")
 TEXT = LANGUAGES[LANGUAGE]
 
-SECTION_DEFAULTS = {"view": "cards", "comments": False, "home": False}
+SECTION_DEFAULTS = {"view": "cards", "comments": False, "home": False, "folder_sort": "name"}
 VIEWS = ("list", "cards")
+FOLDER_SORTS = ("name", "updated")
 VISIBILITIES = ("public", "private")
 # GitHub Actions 会自动设置这个环境变量，所以不用改 deploy.yml，也不会忘记加参数
 PUBLIC_BUILD = "--public" in sys.argv[1:] or os.environ.get("GITHUB_ACTIONS") == "true"
@@ -104,6 +105,19 @@ class Folder:
         for sub in self.subfolders:
             yield from sub.all_docs()
 
+    @property
+    def latest(self):
+        """里面所有文章（包括子文件夹）最近一次修改的日期，按修改时间排文件夹时用。没修改过的文章用它自己的日期。"""
+        return max((d.updated or d.date for d in self.all_docs()), default="")
+
+
+def sort_folders(folders, section, name_of):
+    """文件夹的顺序：默认按名字；栏目设置了 folder_sort: "updated" 时，最近修改过的排前面，同一天的再按名字。"""
+    by_name = sorted(folders, key=lambda f: natural_key(name_of(f)))
+    if section_option(section, "folder_sort") != "updated":
+        return by_name
+    return sorted(by_name, key=lambda f: f.latest, reverse=True)  # sorted 是稳定的，同一天保持名字顺序
+
 
 # ---------- 工具函数 ----------
 def ignored(path):
@@ -127,6 +141,8 @@ def check_sections(dirs):
             raise SystemExit(f"config.py：栏目 {name} 有不认识的设置 {sorted(unknown)}，可以写的是 {sorted(SECTION_DEFAULTS)}")
         if section_option(name, "view") not in VIEWS:
             raise SystemExit(f"config.py：栏目 {name} 的 view 只能是 {' 或 '.join(VIEWS)}")
+        if section_option(name, "folder_sort") not in FOLDER_SORTS:
+            raise SystemExit(f"config.py：栏目 {name} 的 folder_sort 只能是 {' 或 '.join(FOLDER_SORTS)}")
         if name not in names:
             print(f"提醒：config.py 里写了栏目 {name}，但根目录下没有这个文件夹")
 
@@ -170,7 +186,7 @@ def git_history():
             raise OSError(result.stderr.strip())
         return result.stdout
 
-    last, first, dirty, tracked = {}, {}, set(), set()
+    last, first, dirty, tracked, commits = {}, {}, set(), set(), {}
     try:
         # 从新到旧：每个文件第一次出现是最后一次修改，最后一次出现（只看新增）是创建
         day = None
@@ -179,6 +195,7 @@ def git_history():
                 day = line[2:]
             elif line:
                 last.setdefault(line, day)
+                commits[line] = commits.get(line, 0) + 1
         for line in git("log", "--diff-filter=A", "--name-only", "--format=@@%as").splitlines():
             if line.startswith("@@"):
                 day = line[2:]
@@ -196,8 +213,8 @@ def git_history():
             index += 1
         tracked = set(git("ls-files", "-z").split("\0")) - {""}
     except OSError:  # 没有安装 git，或者不在 git 仓库里
-        last, first, dirty, tracked = {}, {}, set(), set()
-    _git_cache = (last, first, dirty, tracked)
+        last, first, dirty, tracked, commits = {}, {}, set(), set(), {}
+    _git_cache = (last, first, dirty, tracked, commits)
     return _git_cache
 
 
@@ -213,7 +230,7 @@ def doc_date(path, declared=None):
         match = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", str(declared))
         return "{}-{:0>2}-{:0>2}".format(*match.groups()) if match else str(declared)[:10]
 
-    _, first, _, tracked = git_history()
+    _, first, _, tracked, _ = git_history()
     rel = path.relative_to(ROOT).as_posix()
     if rel in first:
         return first[rel]
@@ -232,11 +249,13 @@ def doc_date(path, declared=None):
 
 
 def modified_date(path):
-    """最后修改日期：提交后没再改过的文件取最后一次提交的日期，有没提交的改动时取文件修改时间。"""
-    last, _, dirty, _ = git_history()
+    """最后修改日期：有没提交的改动时取文件修改时间；提交后没再改过的取最后一次提交的日期。
+    只提交过一次（加进来以后没改过）的文件算作没有修改，返回空字符串，用文章自己的日期：
+    否则一批旧笔记搬进来一起提交，修改日期全都变成提交那天。"""
+    last, _, dirty, _, commits = git_history()
     rel = path.relative_to(ROOT).as_posix()
     if rel not in dirty and rel in last:
-        return last[rel]
+        return last[rel] if commits.get(rel, 0) > 1 else ""
     return date.fromtimestamp(path.stat().st_mtime).isoformat()
 
 
@@ -710,6 +729,9 @@ def render_cards(folder, crumbs, active, sections, index):
     child_crumbs = crumbs + [(folder.name, folder.url)]
     folders = []  # (排序名, 卡片 HTML)
     docs = []
+    section = folder.rel.split("/", 1)[0]
+    ordered = sort_folders([s for s in folder.subfolders if not s.collapsed], section, lambda s: Path(s.rel).name)
+    rank = {id(s): i for i, s in enumerate(ordered)}
     for sub in folder.subfolders:
         if sub.collapsed:
             doc = sub.docs[0]
@@ -717,12 +739,12 @@ def render_cards(folder, crumbs, active, sections, index):
             publish_doc(doc, child_crumbs, active, sections, index)
         else:
             count = TEXT["items"][0 if sub.count == 1 else 1].format(n=sub.count)
-            folders.append((Path(sub.rel).name, card(root, sub.url, ICON_FOLDER, sub.name, count)))
+            folders.append((rank[id(sub)], card(root, sub.url, ICON_FOLDER, sub.name, count)))
             render_cards(sub, child_crumbs, active, sections, index)
     for doc in folder.docs:
         docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, doc.date, doc.written_summary)))
         publish_doc(doc, child_crumbs, active, sections, index)
-    cards = [c for _, c in sorted(folders, key=lambda x: natural_key(x[0]))]
+    cards = [c for _, c in sorted(folders, key=lambda x: x[0])]
     cards += [c for _, c in sorted(docs, key=lambda x: natural_key(x[0]))]
     grid = f'<div class="card-grid">{"".join(cards)}</div>' if cards else f'<p class="empty">{e(TEXT["empty_folder"])}</p>'
     trail = crumbs_html(root, crumbs, folder.name) if crumbs else ""
@@ -746,7 +768,8 @@ def category_links(root, categories):
 def render_list(folder, crumbs, active, sections, index):
     """列表视图：每个文件夹一页，列出它里面所有层的文章，上方是子文件夹的入口。"""
     child_crumbs = crumbs + [(folder.name, folder.url)]
-    subfolders = [sub for sub in folder.subfolders if not sub.collapsed]
+    subfolders = sort_folders([sub for sub in folder.subfolders if not sub.collapsed],
+                              folder.rel.split("/", 1)[0], lambda s: Path(s.rel).name)
     direct = folder.docs + [sub.docs[0] for sub in folder.subfolders if sub.collapsed]
     for sub in subfolders:  # 先生成子文件夹，这样下面列文章时路径已经有了
         render_list(sub, child_crumbs, active, sections, index)
