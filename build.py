@@ -22,6 +22,7 @@ from html import escape as e, unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote, unquote
+import urllib.request
 
 import yaml
 from pygments.formatters import HtmlFormatter
@@ -39,7 +40,7 @@ TEXT = LANGUAGES[LANGUAGE]
 
 SECTION_DEFAULTS = {"view": "cards", "comments": False, "home": False, "folder_sort": "name"}
 VIEWS = ("list", "cards")
-FOLDER_SORTS = ("name", "updated")
+FOLDER_SORTS = ("name", "updated", "created")
 VISIBILITIES = ("public", "private")
 # GitHub Actions 会自动设置这个环境变量，所以不用改 deploy.yml，也不会忘记加参数
 PUBLIC_BUILD = "--public" in sys.argv[1:] or os.environ.get("GITHUB_ACTIONS") == "true"
@@ -80,9 +81,11 @@ class Doc:
     private: bool = False  # visibility: private，只有本机构建时才有这个页面
     template_css: str = ""  # 写了 template: 的文章：模板的样式，只放进这一页
     doc_class: str = ""  # 模板给正文加的 class，比如 numbered
-    template_head: bool = False
-    author: str = ""  # frontmatter 的 author，书架上显示在卡片和标题下面
-    file: str = ""  # frontmatter 的 file：本机文件的位置，页面上给一个“打开文件”的按钮  # 模板自己在正文开头写了题目（numbered 类），页面上就不再重复标题
+    template_head: bool = False  # 模板自己在正文开头写了题目（numbered 类），页面上就不再重复标题
+    author: str = ""  # frontmatter 的 author，任何文章都可以写，显示在标题下面；书（写了 file 的）的卡片上也显示作者
+    file: str = ""  # frontmatter 的 file：本机文件的位置，任何文章都可以写，标题下面给一个“打开文件”的按钮，不显示日期
+    status: str = ""  # frontmatter 的 status：进行中、在读、连载中……任何文章都可以写，显示在标题、卡片和列表的标题旁边
+    repo: str = ""  # frontmatter 的 repo：代码仓库地址，任何文章都可以写，标题下面给一个“代码仓库”的按钮
 
 
 @dataclass
@@ -115,13 +118,20 @@ class Folder:
         """里面所有文章（包括子文件夹）最近一次修改的日期，按修改时间排文件夹时用。没修改过的文章用它自己的日期。"""
         return max((d.updated or d.date for d in self.all_docs()), default="")
 
+    @property
+    def created(self):
+        """文件夹的创建日期，按创建时间排文件夹时用：项目用 PLAN.md 的日期，其他文件夹用里面最早的文章的日期。"""
+        plan = project_plan(self)
+        return plan.date if plan else min((d.date for d in self.all_docs()), default="")
+
 
 def sort_folders(folders, section, name_of):
-    """文件夹的顺序：默认按名字；栏目设置了 folder_sort: "updated" 时，最近修改过的排前面，同一天的再按名字。"""
+    """文件夹的顺序：默认按名字；folder_sort 是 "updated" 时最近修改过的排前面，是 "created" 时新建的排前面，同一天的再按名字。"""
     by_name = sorted(folders, key=lambda f: natural_key(name_of(f)))
-    if section_option(section, "folder_sort") != "updated":
+    order = section_option(section, "folder_sort")
+    if order == "name":
         return by_name
-    return sorted(by_name, key=lambda f: f.latest, reverse=True)  # sorted 是稳定的，同一天保持名字顺序
+    return sorted(by_name, key=lambda f: f.latest if order == "updated" else f.created, reverse=True)  # sorted 是稳定的，同一天保持名字顺序
 
 
 # ---------- 工具函数 ----------
@@ -443,7 +453,7 @@ def load_markdown(path, rel):
     else:
         html = MD.render(body)
         heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", html, re.S)
-        if heading and not html[:heading.start()].strip():  # 页面已经显示标题，开头的一级标题不再重复
+        if heading and not re.sub(r"<!--.*?-->", "", html[:heading.start()], flags=re.S).strip():  # 页面已经显示标题，开头的一级标题不再重复
             html = html[heading.end():]
     # 笔记之间的 [链接](other.md) 指向生成后的网页
     html = re.sub(r'href="(?![a-z]+:|#)([^"]+?)\.(?:md|markdown)(#[^"]*)?"',
@@ -467,6 +477,8 @@ def load_markdown(path, rel):
         # 编辑器里模板样式作用在整个 .doc 上；博客的 .doc 还包着标题栏和目录，所以换成只包正文的 .doc-body
         author=", ".join(map(str, meta["author"])) if isinstance(meta.get("author"), list) else str(meta.get("author") or ""),
         file=str(meta.get("file") or ""),
+        status=str(meta.get("status") or ""),
+        repo=str(meta.get("repo") or ""),
         template_css=re.sub(r"\.doc(?![\w-])", ".doc-body", template.get("template_css", "")),
         # 不要 paged：网页上按博客的宽度显示，不做成一张纸
         doc_class=" ".join(c for c in template.get("doc_class", "").split() if c != "paged"),
@@ -682,7 +694,7 @@ def post_list(root, posts, depth):
         items.append(
             f'<article class="post{" has-cover" if cover else ""}" data-tags="{e(json.dumps(post.tags, ensure_ascii=False))}">'
             f'<div class="post-body"><div class="post-meta"><time datetime="{e(post.date)}">{e(post.date)}</time>{path}</div>'
-            f'<h2><a href="{link(root, post.url)}">{e(post.title)}</a></h2>{summary}{tags}</div>{cover}</article>'
+            f'<h2><a href="{link(root, post.url)}">{e(post.title)}</a>{status_html(post.status)}</h2>{summary}{tags}</div>{cover}</article>'
         )
     return f'<div class="post-list">{"".join(items)}</div>'
 
@@ -752,30 +764,162 @@ def render_doc(doc, crumbs, active, sections):
         )
         emit(doc.url, doc.title, body, sections, active, body_class="frame-page")
         return
-    tags = f'<div class="tags">{tag_links(root, doc)}</div>' if doc.tags else ""
-    updated = ""
-    if doc.updated > doc.date:  # 都是 YYYY-MM-DD，可以直接比较
-        stamp = f'<time datetime="{e(doc.updated)}">{e(doc.updated)}</time>'
-        updated = f'<span class="doc-updated">{TEXT["updated"].format(date=stamp)}</span>'
     comments = comments_html() if section_option(section_of(doc), "comments") else ""
-    # 模板自己在正文开头写了题目和日期时，标题栏只留更新日期和标签，不重复
-    title = "" if doc.template_head else f"<h1>{e(doc.title)}</h1>"
-    when = "" if doc.template_head else f'<time datetime="{e(doc.date)}">{e(doc.date)}</time>'
-    if doc.file:  # 书：标题下面是作者和打开文件的按钮，日期没有意义
-        href = file_link(root, doc.file)
-        if not href and os.name == "nt":
-            print(f"提醒：{doc.src} 的 file 找不到：{doc.file}")
-        author = f'<span class="doc-author">{e(doc.author)}</span>' if doc.author else ""
-        button = f'<a class="file-open" href="{e(href)}" target="_blank" rel="noopener">{e(TEXT["open_file"])}</a>' if href else ""
-        when, updated = author + button, ""
-    meta = f'<div class="doc-meta">{when}{updated}{tags}</div>' if when or updated or tags else ""
+    head = doc_head(root, doc, doc.date, doc.updated)
     prose = " ".join(["prose"] + (["doc-body"] + doc.doc_class.split() if doc.template_css else []))
     body = (
         f'<main class="container">{trail}<article class="doc">'
-        f'<header class="doc-head">{title}{meta}</header>'
-        f'{toc_html(doc.html)}<div class="{prose}">{doc.html}</div></article>{comments}</main>'
+        f'{head}{toc_html(doc.html)}<div class="{prose}">{doc.html}</div></article>{comments}</main>'
     )
     emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html, doc=doc, style=doc.template_css)
+
+
+# ---------- 同步外部文件 ----------
+# 开头写了 sync: 的 md 是“指针”：（不用 source:，日记和文章的 source: 记的是原帖地址）本机构建时把源文件（本机路径或 GitHub 上的文件）的最新内容写进它的正文，
+# 源文件引用的本地图片也复制过来。GitHub 上构建时不联网、不同步，直接用提交进来的内容。
+SYNC_NOTE = "<!-- 下面的内容由 build.py 从 {source} 自动同步，在这里改会被覆盖，请改源文件 -->"
+FRONTMATTER = re.compile(r"---[ \t]*\r?\n.*?\r?\n---[ \t]*(?:\r?\n|$)", re.S)
+REFERENCE = re.compile(r'(!?\[[^\]]*\]\(\s*<?)([^)\s>]+)|(<(?:img|source|video|audio)\b[^>]*?\bsrc\s*=\s*["\'])([^"\']+)', re.I)
+
+
+def relative_url(url):
+    return not re.match(r"[a-zA-Z][a-zA-Z0-9+.-]*:|/|#|\\", url)
+
+
+def read_source(source, pointer):
+    """读源文件，处理里面的相对链接。返回同步后的正文，读不到时返回 None。"""
+    github = re.match(r"https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$", source)
+    if github:
+        owner, repo, branch, path = github.groups()
+        raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(raw, headers={"User-Agent": "blog-build"}), timeout=15) as response:
+                text = response.read().decode("utf-8-sig")
+        except (OSError, UnicodeDecodeError) as err:
+            print(f"提醒：{pointer.relative_to(ROOT).as_posix()} 没能从 GitHub 读到 {source}（{err}），先用上次同步的内容")
+            return None
+        folder = posixpath.dirname(path)
+
+        def absolute(match):  # 相对地址换成 GitHub 上的地址：图片用原始文件，其他链接用网页
+            prefix, url = (match.group(1), match.group(2)) if match.group(2) else (match.group(3), match.group(4))
+            if not relative_url(url):
+                return match.group(0)
+            target = posixpath.normpath(posixpath.join(folder, url))
+            image = prefix.startswith("!") or prefix.startswith("<")
+            base = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}" if image else f"https://github.com/{owner}/{repo}/blob/{branch}"
+            return prefix + f"{base}/{target}"
+        return REFERENCE.sub(absolute, text.replace("\r\n", "\n"))
+
+    path = Path(source)
+    if not path.is_file():
+        print(f"提醒：{pointer.relative_to(ROOT).as_posix()} 的 sync 找不到：{source}，先用上次同步的内容")
+        return None
+    text = path.read_bytes().decode("utf-8-sig").replace("\r\n", "\n")
+    for match in REFERENCE.finditer(text):  # 本地图片按原来的相对位置复制到指针旁边，链接不用改
+        prefix, url = (match.group(1), match.group(2)) if match.group(2) else (match.group(3), match.group(4))
+        if not relative_url(url) or not (prefix.startswith("!") or prefix.startswith("<")):
+            continue
+        rel = posixpath.normpath(unquote(url.split("#")[0].split("?")[0]))
+        if rel.startswith(".."):
+            continue
+        image, copy = path.parent / rel, pointer.parent / rel
+        if image.is_file() and (not copy.is_file() or copy.read_bytes() != image.read_bytes()):
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(image, copy)
+    return text
+
+
+def sync_pointers(dirs):
+    for folder in dirs:
+        for pointer in sorted(folder.rglob("*.md")):
+            if any(part.startswith((".", "_")) for part in pointer.relative_to(ROOT).parts[:-1]):
+                continue
+            raw = pointer.read_bytes().decode("utf-8-sig")
+            head = FRONTMATTER.match(raw)
+            if not head:
+                continue
+            try:
+                meta = yaml.safe_load(head.group(0).strip().strip("-"))
+            except yaml.YAMLError:
+                continue
+            source = meta.get("sync") if isinstance(meta, dict) else None
+            # 只认本机的绝对路径和 GitHub 上的文件地址
+            if not isinstance(source, str) or not (Path(source).is_absolute() or source.startswith("https://github.com/")):
+                if source:
+                    print(f"提醒：{pointer.relative_to(ROOT).as_posix()} 的 sync 要写本机的完整路径或 GitHub 上文件的地址：{source}")
+                continue
+            rel = pointer.relative_to(ROOT).as_posix()
+            text = read_source(str(source), pointer)
+            if text is None:
+                continue
+            text = FRONTMATTER.sub("", text, count=1) if FRONTMATTER.match(text) else text  # 源文件自己的开头信息不要
+            nl = "\r\n" if "\r\n" in head.group(0) else "\n"
+            body = (SYNC_NOTE.format(source=source) + "\n\n" + text.strip() + "\n").replace("\n", nl)
+            if raw[head.end():] != body:
+                pointer.write_bytes((head.group(0) + body).encode("utf-8"))
+                print(f"提醒：{rel} 已从 {source} 同步，记得提交")
+
+
+# ---------- 项目 ----------
+# 文件夹里有 PLAN.md 的就是一个项目：PLAN.md 开头写 title、status、summary、repo，正文是规划（任务清单、时间节点）。
+# 项目卡片和其他卡片一样（标题旁边一个状态小标签、简介、日期），和其他文件夹一起按栏目的 folder_sort 排；项目页面先显示规划，再显示 README。
+
+
+def project_plan(folder):
+    return next((doc for doc in folder.docs if Path(doc.src).name.lower() == "plan.md"), None)
+
+
+def project_readme(folder):
+    return next((doc for doc in folder.docs if Path(doc.src).name.lower() == "readme.md"), None)
+
+
+def project_summary(folder, plan):
+    """和文章一样：PLAN.md 开头写了 summary 就用它，没写就取 README 的第一段（没有 README 时取规划的第一段）。"""
+    readme = project_readme(folder)
+    return plan.written_summary or (readme.summary if readme else plan.summary)
+
+
+def project_card(root, folder, plan):
+    """和其他卡片一个样子：标题（旁边是状态）、简介、日期。"""
+    return card(root, folder.url, ICON_FOLDER, plan.title, plan.date, project_summary(folder, plan), badge=plan.status)
+
+
+def status_html(status):
+    """frontmatter 的 status（进行中、在读、连载中……）：标题旁边的小标签。"""
+    return f'<span class="status">{e(status)}</span>' if status else ""
+
+
+def doc_head(root, doc, date, updated):
+    """所有页面的标题栏：标题和状态，下面一行是日期、更新于、作者、打开文件、代码仓库、标签，有哪项显示哪项。
+    项目页面也用它，日期是 PLAN.md 的，更新于看整个项目文件夹。"""
+    # 模板自己在正文开头写了题目和日期时，标题栏只留更新日期和标签，不重复
+    title = "" if doc.template_head else f"<h1>{e(doc.title)}{status_html(doc.status)}</h1>"
+    # 写了 file 的（比如书）指向电脑上的文件，md 的日期没有意义，显示作者
+    when = "" if doc.template_head or doc.file else f'<time datetime="{e(date)}">{e(date)}</time>'
+    updated = "" if doc.file else updated_html(date, updated)
+    author = f'<span class="doc-author">{e(doc.author)}</span>' if doc.author else ""
+    buttons = ""
+    if doc.file:
+        href = file_link(root, doc.file)
+        if href:
+            buttons += f'<a class="file-open" href="{e(href)}" target="_blank" rel="noopener">{e(TEXT["open_file"])}</a>'
+        elif os.name == "nt":
+            print(f"提醒：{doc.src} 的 file 找不到：{doc.file}")
+    if doc.repo:
+        buttons += f'<a class="file-open" href="{e(doc.repo)}" target="_blank" rel="noopener">{e(TEXT["repository"])}</a>'
+    tags = f'<div class="tags">{tag_links(root, doc)}</div>' if doc.tags else ""
+    status = status_html(doc.status) if doc.template_head else ""  # 没有标题时状态放在这一行
+    line = status + when + updated + author + buttons + tags
+    meta = f'<div class="doc-meta">{line}</div>' if line else ""
+    return f'<header class="doc-head">{title}{meta}</header>'
+
+
+def updated_html(date, updated):
+    """标题下面的“更新于”：比创建日期晚才显示。"""
+    if not updated or updated <= date:  # 都是 YYYY-MM-DD，可以直接比较
+        return ""
+    stamp = f'<time datetime="{e(updated)}">{e(updated)}</time>'
+    return f'<span class="doc-updated">{TEXT["updated"].format(date=stamp)}</span>'
 
 
 # ---------- 本机文件 ----------
@@ -815,11 +959,12 @@ def remove_file_links():
             os.rmdir(path) if os.path.isjunction(path) else path.unlink()
 
 
-def card(root, url, icon, title, meta, summary=""):
+def card(root, url, icon, title, meta, summary="", badge=""):
     summary = f'<span class="card-summary">{e(summary)}</span>' if summary else ""
+    badge = status_html(badge)
     return (
         f'<a class="card" href="{link(root, url)}">{icon}'
-        f'<span class="card-body"><span class="card-title">{e(title)}</span>{summary}'
+        f'<span class="card-body"><span class="card-title">{e(title)}{badge}</span>{summary}'
         f'<span class="card-meta">{e(meta)}</span></span></a>'
     )
 
@@ -846,23 +991,51 @@ def render_cards(folder, crumbs, active, sections, index):
     ordered = sort_folders([s for s in folder.subfolders if not s.collapsed], section, lambda s: Path(s.rel).name)
     rank = {id(s): i for i, s in enumerate(ordered)}
     for sub in folder.subfolders:
+        plan = project_plan(sub)
+        if plan:
+            folders.append((rank[id(sub)], project_card(root, sub, plan)))
+            render_cards(sub, child_crumbs, active, sections, index)
+            continue
         if sub.collapsed:
             doc = sub.docs[0]
-            docs.append((Path(sub.rel).name, card(root, doc.url, ICON_DOC, doc.title, card_meta(doc), doc.written_summary)))
+            docs.append((Path(sub.rel).name, card(root, doc.url, ICON_DOC, doc.title, card_meta(doc), doc.written_summary, badge=doc.status)))
             publish_doc(doc, child_crumbs, active, sections, index)
         else:
             count = TEXT["items"][0 if sub.count == 1 else 1].format(n=sub.count)
             folders.append((rank[id(sub)], card(root, sub.url, ICON_FOLDER, sub.name, count)))
             render_cards(sub, child_crumbs, active, sections, index)
     for doc in folder.docs:
-        docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, card_meta(doc), doc.written_summary)))
+        docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, card_meta(doc), doc.written_summary, badge=doc.status)))
         publish_doc(doc, child_crumbs, active, sections, index)
     cards = [c for _, c in sorted(folders, key=lambda x: x[0])]
     cards += [c for _, c in sorted(docs, key=lambda x: natural_key(x[0]))]
-    grid = f'<div class="card-grid">{"".join(cards)}</div>' if cards else f'<p class="empty">{e(TEXT["empty_folder"])}</p>'
+    grid = f'<div class="card-grid">{"".join(cards)}</div>' if cards else ""
+    if not grid:
+        grid = f'<p class="empty">{e(TEXT["empty_folder"])}</p>'
     trail = crumbs_html(root, crumbs, folder.name) if crumbs else ""
-    emit(folder.url, folder.name, f'<main class="container">{trail}<h1 class="page-title">{e(folder.name)}</h1>{grid}</main>',
-         sections, active)
+    plan = project_plan(folder)
+    if plan:  # 项目页面：项目信息和规划，再接 README，其他文件放在最后
+        readme = project_readme(folder)
+        readme_html = ""
+        if readme:  # README 里的锚点都加上 readme- 前缀，免得和规划里同名的标题、脚注撞在一起
+            readme_html = re.sub(r'\bid="', 'id="readme-', readme.html)
+            readme_html = re.sub(r'href="#', 'href="#readme-', readme_html)
+        # 目录：规划的标题，再是 README，README 自己的标题降一级放在它下面
+        nested = re.sub(r"<(/?)h([1-5])\b", lambda m: f"<{m.group(1)}h{int(m.group(2)) + 1}", readme_html)
+        toc = toc_html(plan.html + ('<h2 id="readme">README</h2>' + nested if readme else ""))
+        parts = [doc_head(root, plan, plan.date, folder.latest), toc, f'<div class="prose">{plan.html}</div>']
+        if readme:
+            parts.append(f'<section class="project-readme"><h2 id="readme" class="group-title">README</h2>'
+                         f'<div class="prose">{readme_html}</div></section>')
+        rest = [c for c in cards if plan.url not in c and not (readme and readme.url in c)]
+        if rest:
+            parts.append(f'<div class="card-grid">{"".join(rest)}</div>')
+        html = "".join(parts)
+        emit(folder.url, plan.title, f'<main class="container">{trail}<article class="doc">{html}</article></main>',
+             sections, active, math='class="math' in html)
+    else:
+        emit(folder.url, folder.name, f'<main class="container">{trail}<h1 class="page-title">{e(folder.name)}</h1>{grid}</main>',
+             sections, active)
     index.append({"t": folder.name, "u": folder.url, "p": " / ".join(n for n, _ in crumbs), "g": [], "x": "", "k": "folder"})
 
 
@@ -995,6 +1168,8 @@ def build():
     check_sections(dirs)
     order = list(SECTIONS)  # 配置里写的栏目按写的顺序排在前面，其余的按文件夹名排在后面
     dirs.sort(key=lambda p: (order.index(p.name) if p.name in order else len(order), natural_key(p.name)))
+    if os.environ.get("GITHUB_ACTIONS") != "true":  # GitHub 上不联网同步，直接用提交进来的内容
+        sync_pointers(dirs)
     sections = [scan(p) for p in dirs]
     private_docs = []
     private_files = set()

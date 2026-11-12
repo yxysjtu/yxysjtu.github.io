@@ -14,11 +14,12 @@ LANGUAGE = "en"  # 界面文字的语言："zh" 或 "en"，文字在 i18n.py 里
 #             "cards" 卡片视图（默认）：把子文件夹和文件显示成卡片，一层层点进去
 #   comments  True 表示这个栏目的文章有评论区（默认 False，还需要填好下面的 GISCUS）
 #   home      True 表示这个栏目最新的文章显示在主页（默认 False）
-#   folder_sort  文件夹的顺序："name" 按名字（默认）；"updated" 里面最近修改过的文件夹排前面
+#   folder_sort  文件夹的顺序："name" 按名字（默认）；"updated" 里面最近修改过的文件夹排前面；
+#                "created" 新建的文件夹排前面（项目看 PLAN.md 的日期，其他文件夹看里面最早的文章）。文件始终按名字排
 SECTIONS = {
     "articles": {"view": "list", "comments": True, "home": True},
     "courses": {"view": "cards", "folder_sort": "updated"},
-    "projects": {"view": "cards", "comments": True},
+    "projects": {"view": "cards", "comments": True, "folder_sort": "updated"},
     "books": {"view": "cards"},  # 书架：本机的电子书，每本书一个 md，不推送（见 .gitignore）
     "life": {"view": "list"}
 }
@@ -30,6 +31,7 @@ REDIRECTS = {
     "articles/wild_sea.html": "articles/reflections/wild_sea.html",
     "articles/the_frozen_road.html": "articles/reflections/the_frozen_road.html",
     "articles/winter_in_sweden.html": "articles/reflections/winter_in_sweden.html",
+    "projects/markdown_editor.html": "projects/markdown-editor/index.html",
 }
 VISIBLE_TAGS = 10  # 列表页的标签栏默认显示文章最多的前几个标签，其余点“+N”展开
 SUMMARY_LENGTH = 120  # 自动摘要（第一段）超过多少字就截断并加 ...

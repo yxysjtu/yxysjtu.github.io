@@ -131,6 +131,11 @@ a.tag:hover { background: var(--surface-hover); color: var(--text); }
 .chip.active { background: var(--text); border-color: var(--text); color: #fff; }
 .chip.active span { color: #ccc; }
 .filters:not(.show-all) .chip-extra:not(.active) { display: none; } /* 选中的标签就算排在后面也显示 */
+/* 项目：状态小标签 */
+.status { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 400; vertical-align: middle; }
+.group-title { margin: 28px 0 12px; font-size: 18px; }
+.project-readme { margin-top: 40px; padding-top: 8px; border-top: 1px solid var(--border); }
+
 /* 书架：标题下面的作者和“打开文件”按钮 */
 .doc-author { color: var(--text); }
 .file-open { display: inline-flex; align-items: center; padding: 2px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--accent); }
@@ -182,7 +187,7 @@ a.tag:hover { background: var(--surface-hover); color: var(--text); }
 .icon { width: 24px; height: 24px; fill: none; stroke: #6b6b6b; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .card-body { flex: 1; display: flex; flex-direction: column; margin-top: 20px; } /* 内容靠上，日期固定在底部 */
 .card-title { display: block; font-weight: 600; line-height: 1.4; }
-.card-summary { display: block; margin-top: 4px; color: #4a4a4a; font-size: 14px; line-height: 1.5; }
+.card-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; margin-top: 4px; color: #4a4a4a; font-size: 14px; line-height: 1.5; } /* 卡片上最多三行，长的摘要用省略号 */
 .card-meta { display: block; margin-top: auto; padding-top: 6px; color: var(--muted); font-size: 14px; }
 
 /* 正文 */
