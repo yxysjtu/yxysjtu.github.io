@@ -22,6 +22,7 @@ SECTIONS = {
 }
 
 RECENT_POSTS = 10  # 主页显示几篇最近的文章
+VISIBLE_TAGS = 10  # 列表页的标签栏默认显示文章最多的前几个标签，其余点“+N”展开
 SUMMARY_LENGTH = 120  # 自动摘要（第一段）超过多少字就截断并加 ...
 
 # 文件夹的显示名，任何一层的文件夹都可以写；没写的由文件夹名自动生成（signal processing → Signal Processing）

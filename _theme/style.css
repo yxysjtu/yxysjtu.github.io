@@ -130,6 +130,9 @@ a.tag:hover { background: var(--surface-hover); color: var(--text); }
 .chip:hover { background: var(--surface); }
 .chip.active { background: var(--text); border-color: var(--text); color: #fff; }
 .chip.active span { color: #ccc; }
+.filters:not(.show-all) .chip-extra:not(.active) { display: none; } /* 选中的标签就算排在后面也显示 */
+.chip-more { background: none; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+.chip-more:hover { color: var(--text); }
 #no-match { padding-top: 22px; }
 
 /* 起止日期和日历 */

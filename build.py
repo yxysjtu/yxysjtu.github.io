@@ -29,6 +29,7 @@ from pygments.formatters import HtmlFormatter
 from config import GISCUS, LABELS, LANGUAGE, RECENT_POSTS, SECTIONS, SITE_DESCRIPTION, SITE_TITLE, SUMMARY_LENGTH
 import config  # noqa: E402
 SITE_URL = getattr(config, "SITE_URL", "")  # 旧的 config.py 没有这一项时不出错
+VISIBLE_TAGS = getattr(config, "VISIBLE_TAGS", 10)  # 列表页标签栏默认显示几个标签
 from i18n import LANGUAGES
 
 if LANGUAGE not in LANGUAGES:
@@ -150,6 +151,55 @@ def read_text(path):
     return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
+_git_cache = None
+
+
+def git_history():
+    """一次性读出整个仓库的 git 记录，不再每篇文章单独调用 git（几百次调用要好几秒）。
+    返回 (最后一次提交的日期, 第一次提交的日期, 有没提交改动的文件, 已提交过的文件)，路径都是相对根目录的 posix 路径。
+    没装 git 或者不是 git 仓库时返回空的，日期就退回文件时间。"""
+    global _git_cache
+    if _git_cache is not None:
+        return _git_cache
+
+    def git(*args):
+        result = subprocess.run(["git", "-c", "core.quotePath=false", *args], cwd=ROOT, capture_output=True,
+                                text=True, encoding="utf-8")
+        if result.returncode:
+            raise OSError(result.stderr.strip())
+        return result.stdout
+
+    last, first, dirty, tracked = {}, {}, set(), set()
+    try:
+        # 从新到旧：每个文件第一次出现是最后一次修改，最后一次出现（只看新增）是创建
+        day = None
+        for line in git("log", "--no-renames", "--name-only", "--format=@@%as").splitlines():
+            if line.startswith("@@"):
+                day = line[2:]
+            elif line:
+                last.setdefault(line, day)
+        for line in git("log", "--diff-filter=A", "--name-only", "--format=@@%as").splitlines():
+            if line.startswith("@@"):
+                day = line[2:]
+            elif line:
+                first[line] = day
+        # -z：文件名不转义；改名的条目后面多一个旧路径
+        entries = git("status", "--porcelain", "-z", "--untracked-files=all").split("\0")
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            if entry:
+                dirty.add(entry[3:])
+                if entry[0] in "RC":
+                    index += 1
+            index += 1
+        tracked = set(git("ls-files", "-z").split("\0")) - {""}
+    except OSError:  # 没有安装 git，或者不在 git 仓库里
+        last, first, dirty, tracked = {}, {}, set(), set()
+    _git_cache = (last, first, dirty, tracked)
+    return _git_cache
+
+
 def doc_date(path, declared=None):
     """日期取 frontmatter 的 date，没写就取创建日期，之后再修改也不会变。
 
@@ -162,16 +212,18 @@ def doc_date(path, declared=None):
         match = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", str(declared))
         return "{}-{:0>2}-{:0>2}".format(*match.groups()) if match else str(declared)[:10]
 
-    def git(*args):
-        return subprocess.run(["git", *args, "--", str(path)], cwd=ROOT, capture_output=True,
-                              text=True, encoding="utf-8").stdout.strip()
-
-    try:
-        added = git("log", "--diff-filter=A", "--follow", "--format=%as")
-        if added:
-            return added.splitlines()[-1]  # 从新到旧排列，最后一行是第一次提交
-    except OSError:  # 没有安装 git
-        pass
+    _, first, _, tracked = git_history()
+    rel = path.relative_to(ROOT).as_posix()
+    if rel in first:
+        return first[rel]
+    if rel in tracked:  # 提交过但没有新增记录：是改名或移动过来的，要单独追溯（很少见）
+        try:
+            added = subprocess.run(["git", "log", "--diff-filter=A", "--follow", "--format=%as", "--", str(path)],
+                                   cwd=ROOT, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+            if added:
+                return added.splitlines()[-1]  # 从新到旧排列，最后一行是第一次提交
+        except OSError:
+            pass
     stat = path.stat()
     # Windows 上 st_ctime 就是创建时间；别的系统没有创建时间时，退回修改时间
     created = getattr(stat, "st_birthtime", None) or (stat.st_ctime if os.name == "nt" else stat.st_mtime)
@@ -180,17 +232,10 @@ def doc_date(path, declared=None):
 
 def modified_date(path):
     """最后修改日期：提交后没再改过的文件取最后一次提交的日期，有没提交的改动时取文件修改时间。"""
-    def git(*args):
-        return subprocess.run(["git", *args, "--", str(path)], cwd=ROOT, capture_output=True,
-                              text=True, encoding="utf-8").stdout.strip()
-
-    try:
-        if not git("status", "--porcelain"):
-            committed = git("log", "-1", "--format=%as")
-            if committed:
-                return committed
-    except OSError:  # 没有安装 git
-        pass
+    last, _, dirty, _ = git_history()
+    rel = path.relative_to(ROOT).as_posix()
+    if rel not in dirty and rel in last:
+        return last[rel]
     return date.fromtimestamp(path.stat().st_mtime).isoformat()
 
 
@@ -724,10 +769,16 @@ def render_list_page(url, name, crumbs, docs, categories, active, sections):
     for post in posts:
         for tag in post.tags:
             counts[tag] = counts.get(tag, 0) + 1
+    # 标签按文章数从多到少排，只显示前 VISIBLE_TAGS 个，其余点“+N”展开；选中的标签总会显示
+    ranked = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
     chips = "".join(
-        f'<a class="chip" href="#tag={quote(tag)}" data-tag="{e(tag)}">{e(tag)}<span>{n}</span></a>'
-        for tag, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+        f'<a class="chip{" chip-extra" if i >= VISIBLE_TAGS else ""}" href="#tag={quote(tag)}" data-tag="{e(tag)}">{e(tag)}<span>{n}</span></a>'
+        for i, (tag, n) in enumerate(ranked)
     )
+    if len(ranked) > VISIBLE_TAGS:
+        more = TEXT["more_tags"].format(n=len(ranked) - VISIBLE_TAGS)
+        chips += (f'<button type="button" class="chip chip-more" aria-expanded="false" '
+                  f'data-more="{e(more)}" data-less="{e(TEXT["fewer_tags"])}">{e(more)}</button>')
     if chips:
         chips = f'<a class="chip" href="#" data-tag="">{e(TEXT["all"])}<span>{len(posts)}</span></a>{chips}'
 

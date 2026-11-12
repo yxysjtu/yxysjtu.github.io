@@ -71,7 +71,15 @@
   // ---------- 标签和日期筛选（文章页，#tag=xxx&from=2026-11-01&to=2026-11-30） ----------
   var dateRange = document.getElementById('date-range');
   if (dateRange) {
-    var chips = document.querySelectorAll('.chip');
+    var chips = document.querySelectorAll('a.chip');
+    var moreTags = document.querySelector('.chip-more');
+    if (moreTags) {
+      moreTags.addEventListener('click', function () {
+        var open = moreTags.parentNode.classList.toggle('show-all');
+        moreTags.setAttribute('aria-expanded', open);
+        moreTags.textContent = open ? moreTags.dataset.less : moreTags.dataset.more;
+      });
+    }
     var posts = document.querySelectorAll('.post');
     var noMatch = document.getElementById('no-match');
     var fromInput = document.getElementById('date-from');
