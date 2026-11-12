@@ -1,0 +1,72 @@
+/* 学术报告模板的外观，var(--名字) 的默认值在 report.md。这是一个普通的模板 CSS，直接写选择器，& 表示文档本身。
+   默认字号按国内毕业论文和 GB/T 7713 的常见要求：题目二号，一级标题三号，二级标题四号，三级标题和正文小四，图题、表题和表格五号 */
+
+/* Latin 字符用粗体的 Times New Roman，和不加粗的黑体放在一起才协调 */
+@font-face { font-family: "Report Heading Latin"; src: local("Times New Roman Bold"), local("TimesNewRomanPS-BoldMT"); unicode-range: U+0-2FF, U+2000-206F; }
+
+& {
+  color: #000;
+  font-family: var(--body-font), serif;
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+}
+.prose { overflow-wrap: anywhere; }
+
+/* 题目、作者和摘要 */
+.front-matter { margin-bottom: 1.5em; }
+.doc-title { margin: 0 0 .6em; font-family: var(--title-font, var(--heading-font)), sans-serif; font-size: var(--title-size); font-weight: 400; line-height: 1.3; text-align: var(--title-align); }
+.doc-author, .doc-affiliation, .doc-date { margin: 0; text-indent: 0; text-align: center; }
+.doc-affiliation, .doc-date { font-size: 10.5pt; }
+.doc-abstract, .doc-keywords { margin: .8em 0 0; text-indent: 0; font-size: 10.5pt; }
+.doc-abstract + .doc-abstract { margin-top: 0; text-indent: 2em; }
+.front-label { font-family: var(--heading-font), sans-serif; font-weight: 400; }
+
+/* 标题 */
+h1, h2, h3, h4 { font-weight: 400; line-height: 1.5; }
+h1 { margin: 1.2em 0 .8em; font-family: var(--heading-1-font, var(--heading-font)), sans-serif; font-size: var(--heading-1-size); text-align: var(--heading-1-align, inherit); }
+h2 { margin: 1em 0 .5em; font-family: var(--heading-2-font, var(--heading-font)), sans-serif; font-size: var(--heading-2-size); text-align: var(--heading-2-align, inherit); }
+h3 { margin: .8em 0 .4em; font-family: var(--heading-3-font, var(--heading-font)), sans-serif; font-size: var(--heading-3-size); text-align: var(--heading-3-align, inherit); }
+h4 { margin: .6em 0 .3em; font-family: var(--heading-font), sans-serif; font-size: 12pt; }
+
+/* 正文：两端对齐。英文两端对齐时要断词，否则单词间距会被拉得很开 */
+p { margin: 0; text-align: justify; text-indent: var(--first-line-indent); hyphens: auto; }
+ul, ol { margin: 0; padding-left: 2em; }
+li > p { margin: 0; text-indent: 0; }
+blockquote { margin: .5em 0; padding: 0 0 0 2em; border: 0; color: inherit; }
+blockquote p { text-indent: 0; }
+a { color: inherit; text-decoration: none; }
+a[href^="http"] { color: var(--accent); }
+
+/* 图题、表题和代码标题。图题在图下方，表题和代码标题在上方 */
+.caption { margin: .5em 0 0; font-size: var(--caption-size); line-height: 1.5; text-align: var(--caption-align); text-indent: 0; }
+.caption-label { font-family: var(--heading-font), sans-serif; }
+.subfigure-caption { align-self: start; margin: .3em 0 0; }
+
+/* 表。默认是三线表：table-rule 是上下两条粗线，cell-border 是格子的边框 */
+.table-caption { margin: 1em 0 .4em; }
+table { display: table; width: auto; min-width: 60%; max-width: 100%; margin: 0 auto 1em; border-top: var(--table-rule); border-bottom: var(--table-rule); font-size: 10.5pt; line-height: 1.4; }
+.table-caption + table { margin-top: 0; }
+th, td { padding: 3pt 10pt; border: var(--cell-border); text-align: center; }
+th { border-bottom: .75pt solid #000; background: none; font-family: var(--heading-font), sans-serif; font-weight: 400; }
+
+/* 公式。KaTeX 默认放大到 1.21 倍，在 Times 和宋体旁边明显偏大 */
+.katex { font-size: 1.04em; }
+
+/* 代码和脚注。代码的标题不和代码分在两页 */
+.code-caption { margin: 1em 0 .4em; break-after: avoid; }
+.code-caption + pre, .code-caption + .code-long pre { margin-top: 0; }
+code { padding: 0; background: none; font: 10.5pt/1.4 Consolas, Menlo, "Courier New", monospace; }
+pre { margin: .8em 0; padding: 6pt 8pt; border: .75pt solid #999; border-radius: 0; background: none; line-height: 1.3; }
+pre code { font-size: 9pt; }
+hr { margin: 1.5em 0; border-top: .75pt solid #000; }
+.footnotes { font-size: 9pt; }
+.footnotes p { text-indent: 0; }
+ul.contains-task-list { padding-left: 0; }
+
+@media print {
+  p { orphans: 2; widows: 2; }
+  a[href^="http"] { color: inherit; }
+  /* 贴着版心边缘时，边框会被页面裁掉。短代码整块放到一页；太长只能跨页时，每一页的框各自闭合 */
+  pre { margin-left: 1px; margin-right: 1px; break-inside: avoid; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .code-long pre { break-inside: auto; }
+}

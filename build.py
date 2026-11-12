@@ -78,6 +78,9 @@ class Doc:
     sort_name: str = ""
     crumbs: list = field(default_factory=list)  # 从栏目到所在文件夹的路径 [(显示名, 网址), ...]
     private: bool = False  # visibility: private，只有本机构建时才有这个页面
+    template_css: str = ""  # 写了 template: 的文章：模板的样式，只放进这一页
+    doc_class: str = ""  # 模板给正文加的 class，比如 numbered
+    template_head: bool = False  # 模板自己在正文开头写了题目（numbered 类），页面上就不再重复标题
 
 
 @dataclass
@@ -295,24 +298,45 @@ def plain_text(html):
 
 
 # ---------- Markdown ----------
-# 渲染规则和 Markdown 编辑器共用，在编辑器仓库的 md_render.py 里，这样编辑器预览和网站显示一致。
-# 博客仓库里放一份副本，GitHub 上构建时用它。
+# 渲染规则和模板都和 Markdown 编辑器共用，在编辑器仓库里，这样编辑器预览和网站显示一致。
+# 博客仓库的 _render/ 里放一份副本，GitHub 上构建时用它。
+RENDER = ROOT / "_render"
+RENDER_FILES = ["md_render.py", "doc_render.py", "numbered.py", "template_loader.py", "template_style.py", "paths.py"]
+
+
 def sync_renderer():
-    """本机构建时，编辑器那份 md_render.py 改过了就先复制过来，提交博客时副本就跟着更新。
-    config.py 的 RENDERER_SOURCE 是编辑器那份的位置；找不到时（比如 GitHub 上）直接用副本。"""
+    """本机构建时，编辑器那边改过了就先复制过来，提交博客时副本就跟着更新。
+    config.py 的 RENDERER_SOURCE 是编辑器文件夹；找不到时（比如 GitHub 上）直接用副本。"""
     source = getattr(config, "RENDERER_SOURCE", "")
     if not source:
         return
     source = (ROOT / source).resolve()
-    target = ROOT / "md_render.py"
-    if source.is_file() and (not target.is_file() or source.read_bytes() != target.read_bytes()):
-        shutil.copyfile(source, target)
-        print(f"提醒：已从 {source} 更新 md_render.py，记得和博客一起提交")
+    if source.suffix == ".py":  # 以前写的是 md_render.py 的路径
+        source = source.parent
+    if not (source / "doc_render.py").is_file():
+        return
+    wanted = RENDER_FILES + [f"templates/{p.name}" for p in sorted((source / "templates").glob("*")) if p.suffix in (".md", ".css")]
+    updated = []
+    for name in wanted:
+        target = RENDER / name
+        if not target.is_file() or (source / name).read_bytes() != target.read_bytes():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / name, target)
+            updated.append(name)
+    old_templates = {f"templates/{p.name}" for p in (RENDER / "templates").glob("*")} - set(wanted)
+    for name in old_templates:  # 编辑器里删掉的模板，副本也删掉
+        (RENDER / name).unlink()
+    if updated or old_templates:
+        print(f"提醒：已从 {source} 更新渲染器 {', '.join(updated + sorted(old_templates))}，记得和博客一起提交")
 
 
 sync_renderer()
-from md_render import make_markdown  # noqa: E402  同步之后再导入，用的才是最新的
+sys.path.insert(0, str(RENDER))
+import doc_render  # noqa: E402  同步之后再导入，用的才是最新的
+import template_loader  # noqa: E402
+from md_render import make_markdown  # noqa: E402
 
+template_loader.LIBRARY = "_templates"  # 自己写的模板放在博客的 _templates/，下划线开头不会变成栏目
 MD = make_markdown()
 
 
@@ -390,10 +414,17 @@ def read_private(meta, rel):
 def load_markdown(path, rel):
     meta, body = parse_frontmatter(read_text(path), rel)
     private = read_private(meta, rel)
-    html = MD.render(body)
-    heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", html, re.S)
-    if heading and not html[:heading.start()].strip():  # 页面已经显示标题，开头的一级标题不再重复
-        html = html[heading.end():]
+    template = {}
+    heading = None
+    if meta.get("template"):  # 和编辑器一样按模板渲染：编号、图题、交叉引用、模板样式
+        html, template, problems = doc_render.render_body(meta, body, {}, str(ROOT), rel)
+        for problem in problems:
+            print(f"提醒：{rel} 的模板：{problem}")
+    else:
+        html = MD.render(body)
+        heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", html, re.S)
+        if heading and not html[:heading.start()].strip():  # 页面已经显示标题，开头的一级标题不再重复
+            html = html[heading.end():]
     # 笔记之间的 [链接](other.md) 指向生成后的网页
     html = re.sub(r'href="(?![a-z]+:|#)([^"]+?)\.(?:md|markdown)(#[^"]*)?"',
                   lambda m: f'href="{m.group(1)}.html{m.group(2) or ""}"', html)
@@ -413,6 +444,11 @@ def load_markdown(path, rel):
         text=plain_text(html),
         sort_name=path.name,
         private=private,
+        # 编辑器里模板样式作用在整个 .doc 上；博客的 .doc 还包着标题栏和目录，所以换成只包正文的 .doc-body
+        template_css=re.sub(r"\.doc(?![\w-])", ".doc-body", template.get("template_css", "")),
+        # 不要 paged：网页上按博客的宽度显示，不做成一张纸
+        doc_class=" ".join(c for c in template.get("doc_class", "").split() if c != "paged"),
+        template_head=not template.get("show_head", True) and bool(meta.get("title")),
     )
 
 
@@ -548,7 +584,7 @@ def share_meta(title, url, doc=None):
     return head + (f'\n<link rel="canonical" href="{e(page)}">' if page else "")
 
 
-def emit(url, title, body, sections, active=None, math=False, body_class="", doc=None):
+def emit(url, title, body, sections, active=None, math=False, body_class="", doc=None, style=""):
     root = "../" * url.count("/")
     nav = "".join(
         f'<a href="{link(root, s.url)}"{" class=active aria-current=page" if s.rel == active else ""}>{e(s.name)}</a>'
@@ -560,6 +596,7 @@ def emit(url, title, body, sections, active=None, math=False, body_class="", doc
         f'<script defer src="{KATEX}/contrib/auto-render.min.js"></script>'
     ) if math else ""
     page_title = f"{title} · {SITE_TITLE}" if title != SITE_TITLE else title
+    style_tag = f"\n<style>{style}</style>" if style else ""  # 模板文章才有
     html = f"""<!DOCTYPE html>
 <html lang="{e(TEXT['html_lang'])}">
 <head>
@@ -567,7 +604,7 @@ def emit(url, title, body, sections, active=None, math=False, body_class="", doc
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{e(page_title)}</title>
 {share_meta(title, url, doc)}
-<link rel="stylesheet" href="{root}_assets/style.css?v={ASSET_VERSION}">
+<link rel="stylesheet" href="{root}_assets/style.css?v={ASSET_VERSION}">{style_tag}
 {katex}
 <script defer src="{root}_assets/site.js?v={ASSET_VERSION}" data-root="{root}"></script>
 </head>
@@ -699,12 +736,17 @@ def render_doc(doc, crumbs, active, sections):
         stamp = f'<time datetime="{e(doc.updated)}">{e(doc.updated)}</time>'
         updated = f'<span class="doc-updated">{TEXT["updated"].format(date=stamp)}</span>'
     comments = comments_html() if section_option(section_of(doc), "comments") else ""
+    # 模板自己在正文开头写了题目和日期时，标题栏只留更新日期和标签，不重复
+    title = "" if doc.template_head else f"<h1>{e(doc.title)}</h1>"
+    when = "" if doc.template_head else f'<time datetime="{e(doc.date)}">{e(doc.date)}</time>'
+    meta = f'<div class="doc-meta">{when}{updated}{tags}</div>' if when or updated or tags else ""
+    prose = " ".join(["prose"] + (["doc-body"] + doc.doc_class.split() if doc.template_css else []))
     body = (
-        f'<main class="container">{trail}<article class="doc"><header class="doc-head"><h1>{e(doc.title)}</h1>'
-        f'<div class="doc-meta"><time datetime="{e(doc.date)}">{e(doc.date)}</time>{updated}{tags}</div></header>'
-        f'{toc_html(doc.html)}<div class="prose">{doc.html}</div></article>{comments}</main>'
+        f'<main class="container">{trail}<article class="doc">'
+        f'<header class="doc-head">{title}{meta}</header>'
+        f'{toc_html(doc.html)}<div class="{prose}">{doc.html}</div></article>{comments}</main>'
     )
-    emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html, doc=doc)
+    emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html, doc=doc, style=doc.template_css)
 
 
 def card(root, url, icon, title, meta, summary=""):
