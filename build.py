@@ -80,7 +80,9 @@ class Doc:
     private: bool = False  # visibility: private，只有本机构建时才有这个页面
     template_css: str = ""  # 写了 template: 的文章：模板的样式，只放进这一页
     doc_class: str = ""  # 模板给正文加的 class，比如 numbered
-    template_head: bool = False  # 模板自己在正文开头写了题目（numbered 类），页面上就不再重复标题
+    template_head: bool = False
+    author: str = ""  # frontmatter 的 author，书架上显示在卡片和标题下面
+    file: str = ""  # frontmatter 的 file：本机文件的位置，页面上给一个“打开文件”的按钮  # 模板自己在正文开头写了题目（numbered 类），页面上就不再重复标题
 
 
 @dataclass
@@ -463,6 +465,8 @@ def load_markdown(path, rel):
         sort_name=path.name,
         private=private,
         # 编辑器里模板样式作用在整个 .doc 上；博客的 .doc 还包着标题栏和目录，所以换成只包正文的 .doc-body
+        author=", ".join(map(str, meta["author"])) if isinstance(meta.get("author"), list) else str(meta.get("author") or ""),
+        file=str(meta.get("file") or ""),
         template_css=re.sub(r"\.doc(?![\w-])", ".doc-body", template.get("template_css", "")),
         # 不要 paged：网页上按博客的宽度显示，不做成一张纸
         doc_class=" ".join(c for c in template.get("doc_class", "").split() if c != "paged"),
@@ -757,6 +761,13 @@ def render_doc(doc, crumbs, active, sections):
     # 模板自己在正文开头写了题目和日期时，标题栏只留更新日期和标签，不重复
     title = "" if doc.template_head else f"<h1>{e(doc.title)}</h1>"
     when = "" if doc.template_head else f'<time datetime="{e(doc.date)}">{e(doc.date)}</time>'
+    if doc.file:  # 书：标题下面是作者和打开文件的按钮，日期没有意义
+        href = file_link(root, doc.file)
+        if not href and os.name == "nt":
+            print(f"提醒：{doc.src} 的 file 找不到：{doc.file}")
+        author = f'<span class="doc-author">{e(doc.author)}</span>' if doc.author else ""
+        button = f'<a class="file-open" href="{e(href)}" target="_blank" rel="noopener">{e(TEXT["open_file"])}</a>' if href else ""
+        when, updated = author + button, ""
     meta = f'<div class="doc-meta">{when}{updated}{tags}</div>' if when or updated or tags else ""
     prose = " ".join(["prose"] + (["doc-body"] + doc.doc_class.split() if doc.template_css else []))
     body = (
@@ -765,6 +776,43 @@ def render_doc(doc, crumbs, active, sections):
         f'{toc_html(doc.html)}<div class="{prose}">{doc.html}</div></article>{comments}</main>'
     )
     emit(doc.url, doc.title, body, sections, active, math='class="math' in doc.html, doc=doc, style=doc.template_css)
+
+
+# ---------- 本机文件 ----------
+# frontmatter 写了 file: 的文章（比如书架上的书）指向电脑上的文件。浏览器不让网页直接打开 F:/... 这样的路径，
+# 所以本机构建时在 _site/.files 里建一个指向它所在文件夹的目录链接（Windows 的 junction），不复制文件。
+# 放在点开头的文件夹里：编辑器的文件树和各种扫描都跳过点开头的文件夹，不会去遍历整个电子书文件夹。
+FILES = ".files"
+
+
+def file_link(root, path):
+    """返回网页上打开这个文件的链接；文件不在这台电脑上（比如 GitHub 上构建）时返回空。"""
+    target = Path(path)
+    if os.name != "nt" or not target.is_absolute() or not target.is_file():
+        return ""
+    parts = target.parts  # ("F:\\", "EECS", ..., "x.pdf")
+    if len(parts) > 2:  # 链接到第一层文件夹，比如 F:\EECS
+        top, mount = Path(parts[0], parts[1]), [parts[0][0], parts[1]]
+    else:  # 文件直接放在盘符下面
+        top, mount = Path(parts[0]), [parts[0][0]]
+    link_dir = SITE / FILES / Path(*mount)
+    if not link_dir.exists():
+        link_dir.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link_dir), str(top)], capture_output=True)
+        if not link_dir.exists():
+            print(f"提醒：没能建立指向 {top} 的链接，“打开文件”按钮不可用")
+            return ""
+    return root + quote("/".join([FILES, *mount, target.relative_to(top).as_posix()]))
+
+
+def remove_file_links():
+    """清空 _site 之前先拆掉目录链接，只删链接本身，绝不碰链接指向的文件。"""
+    base = SITE / FILES
+    if not base.exists():
+        return
+    for path in sorted(base.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if os.path.isjunction(path) or path.is_symlink():
+            os.rmdir(path) if os.path.isjunction(path) else path.unlink()
 
 
 def card(root, url, icon, title, meta, summary=""):
@@ -776,11 +824,16 @@ def card(root, url, icon, title, meta, summary=""):
     )
 
 
+def card_meta(doc):
+    """卡片下方的小字：书（写了 file 的）显示作者，其他文章显示日期。"""
+    return doc.author if doc.file else doc.date
+
+
 def publish_doc(doc, crumbs, active, sections, index):
     doc.crumbs = crumbs
     render_doc(doc, crumbs, active, sections)
     index.append({"t": doc.title, "u": doc.url, "p": " / ".join(n for n, _ in crumbs), "g": doc.tags,
-                  "x": f"{doc.written_summary} {doc.text}".strip(), "k": "doc"})
+                  "x": f"{doc.author} {doc.written_summary} {doc.text}".strip(), "k": "doc"})
 
 
 def render_cards(folder, crumbs, active, sections, index):
@@ -795,14 +848,14 @@ def render_cards(folder, crumbs, active, sections, index):
     for sub in folder.subfolders:
         if sub.collapsed:
             doc = sub.docs[0]
-            docs.append((Path(sub.rel).name, card(root, doc.url, ICON_DOC, doc.title, doc.date, doc.written_summary)))
+            docs.append((Path(sub.rel).name, card(root, doc.url, ICON_DOC, doc.title, card_meta(doc), doc.written_summary)))
             publish_doc(doc, child_crumbs, active, sections, index)
         else:
             count = TEXT["items"][0 if sub.count == 1 else 1].format(n=sub.count)
             folders.append((rank[id(sub)], card(root, sub.url, ICON_FOLDER, sub.name, count)))
             render_cards(sub, child_crumbs, active, sections, index)
     for doc in folder.docs:
-        docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, doc.date, doc.written_summary)))
+        docs.append((doc.sort_name, card(root, doc.url, ICON_DOC, doc.title, card_meta(doc), doc.written_summary)))
         publish_doc(doc, child_crumbs, active, sections, index)
     cards = [c for _, c in sorted(folders, key=lambda x: x[0])]
     cards += [c for _, c in sorted(docs, key=lambda x: natural_key(x[0]))]
@@ -929,6 +982,7 @@ def write_redirects():
 def build():
     # 只清空内容、不删目录本身：Windows 上如果有终端或预览服务停在 _site 里，删目录会失败
     SITE.mkdir(exist_ok=True)
+    remove_file_links()
     for child in SITE.iterdir():
         shutil.rmtree(child) if child.is_dir() else child.unlink()
     (SITE / "_assets").mkdir()

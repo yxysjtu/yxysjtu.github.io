@@ -131,6 +131,10 @@ a.tag:hover { background: var(--surface-hover); color: var(--text); }
 .chip.active { background: var(--text); border-color: var(--text); color: #fff; }
 .chip.active span { color: #ccc; }
 .filters:not(.show-all) .chip-extra:not(.active) { display: none; } /* 选中的标签就算排在后面也显示 */
+/* 书架：标题下面的作者和“打开文件”按钮 */
+.doc-author { color: var(--text); }
+.file-open { display: inline-flex; align-items: center; padding: 2px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--accent); }
+.file-open:hover { background: var(--surface); }
 .chip-more { background: none; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
 .chip-more:hover { color: var(--text); }
 #no-match { padding-top: 22px; }

@@ -19,6 +19,7 @@ SECTIONS = {
     "articles": {"view": "list", "comments": True, "home": True},
     "courses": {"view": "cards", "folder_sort": "updated"},
     "projects": {"view": "cards", "comments": True},
+    "books": {"view": "cards"},  # 书架：本机的电子书，每本书一个 md，不推送（见 .gitignore）
     "life": {"view": "list"}
 }
 
@@ -41,6 +42,7 @@ LABELS = {
     "notes": "笔记",
     "experiments": "实验",
     "life": "生活",
+    "books": "书架",
 }
 
 # 评论和表情回应，存在 GitHub Discussions 里。开通方法见 README；两个 ID 没填时不显示评论区
