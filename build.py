@@ -420,6 +420,10 @@ def load_markdown(path, rel):
         html, template, problems = doc_render.render_body(meta, body, {}, str(ROOT), rel)
         for problem in problems:
             print(f"提醒：{rel} 的模板：{problem}")
+        if not meta.get("title"):
+            # 没写 title 时页面标题栏照常显示标题和日期，模板开头的题目块就只剩日期，重复了，去掉
+            html = re.sub(r'<p class="doc-date">.*?</p>', "", html, count=1, flags=re.S)
+            html = re.sub(r'<header class="front-matter">\s*</header>\s*', "", html, count=1)
         # 标题取第一个一级标题的文字（不带编号），但正文里留着它：模板会把它编成第 1 章
         first = re.search(r'<h1\b[^>]*>(?:<span class="heading-number">[^<]*</span>\s*)?(.*?)</h1>', html, re.S)
         heading = first  # 只在 frontmatter 没写 title 时用
