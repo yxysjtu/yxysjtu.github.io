@@ -420,6 +420,9 @@ def load_markdown(path, rel):
         html, template, problems = doc_render.render_body(meta, body, {}, str(ROOT), rel)
         for problem in problems:
             print(f"提醒：{rel} 的模板：{problem}")
+        # 标题取第一个一级标题的文字（不带编号），但正文里留着它：模板会把它编成第 1 章
+        first = re.search(r'<h1\b[^>]*>(?:<span class="heading-number">[^<]*</span>\s*)?(.*?)</h1>', html, re.S)
+        heading = first  # 只在 frontmatter 没写 title 时用
     else:
         html = MD.render(body)
         heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", html, re.S)
