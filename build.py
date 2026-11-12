@@ -21,18 +21,10 @@ from datetime import date
 from html import escape as e, unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import quote, unquote
 
 import yaml
-from markdown_it import MarkdownIt
-from mdit_py_plugins.anchors import anchors_plugin
-from mdit_py_plugins.dollarmath import dollarmath_plugin
-from mdit_py_plugins.footnote import footnote_plugin
-from mdit_py_plugins.tasklists import tasklists_plugin
-from pygments import highlight as pygments_highlight
 from pygments.formatters import HtmlFormatter
-from pygments.lexers import get_lexer_by_name
-from pygments.util import ClassNotFound
 
 from config import GISCUS, LABELS, LANGUAGE, RECENT_POSTS, SECTIONS, SITE_DESCRIPTION, SITE_TITLE, SUMMARY_LENGTH
 import config  # noqa: E402
@@ -238,109 +230,25 @@ def plain_text(html):
 
 
 # ---------- Markdown ----------
-def highlight_code(code, lang, _attrs):
-    try:
-        lexer = get_lexer_by_name(lang)
-    except ClassNotFound:
-        return ""  # 交给 markdown-it 按普通代码块输出
-    return pygments_highlight(code, lexer, HtmlFormatter(nowrap=True))
+# 渲染规则和 Markdown 编辑器共用，在编辑器仓库的 md_render.py 里，这样编辑器预览和网站显示一致。
+# 博客仓库里放一份副本，GitHub 上构建时用它。
+def sync_renderer():
+    """本机构建时，编辑器那份 md_render.py 改过了就先复制过来，提交博客时副本就跟着更新。
+    config.py 的 RENDERER_SOURCE 是编辑器那份的位置；找不到时（比如 GitHub 上）直接用副本。"""
+    source = getattr(config, "RENDERER_SOURCE", "")
+    if not source:
+        return
+    source = (ROOT / source).resolve()
+    target = ROOT / "md_render.py"
+    if source.is_file() and (not target.is_file() or source.read_bytes() != target.read_bytes()):
+        shutil.copyfile(source, target)
+        print(f"提醒：已从 {source} 更新 md_render.py，记得和博客一起提交")
 
 
-def render_math(content, opts):
-    if opts.get("display_mode"):
-        return f'<span class="math math-display">\\[{e(content)}\\]</span>'
-    return f'<span class="math">\\({e(content)}\\)</span>'
+sync_renderer()
+from md_render import make_markdown  # noqa: E402  同步之后再导入，用的才是最新的
 
-
-def strip_quote_markers(state):
-    """公式插件不会去掉引用里每行开头的 >，这里按引用层数去掉。"""
-    depth = 0
-    for token in state.tokens:
-        if token.type == "blockquote_open":
-            depth += 1
-        elif token.type == "blockquote_close":
-            depth -= 1
-        elif token.type == "math_block" and depth:
-            token.content = re.sub(rf"^[ \t]*(?:>[ \t]?){{1,{depth}}}", "", token.content, flags=re.M)
-
-
-# ---------- 视频 ----------
-# 单独一行写 @[youtube](视频ID或链接) 或 @[bilibili](BV号或链接)，可以在后面加 "标题"
-VIDEO_LINE = re.compile(r'@\[(youtube|bilibili)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)\s*$', re.I)
-VIDEO_TITLES = {"youtube": "YouTube 视频", "bilibili": "哔哩哔哩视频"}
-
-
-def start_seconds(query):
-    """链接里的开始时间：t=90、t=1m30s、start=90，都换成秒。"""
-    params = parse_qs(query)
-    value = (params.get("t") or params.get("start") or [""])[0]
-    match = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?", value)
-    if not match or not value:
-        return 0
-    hours, minutes, seconds = (int(x or 0) for x in match.groups())
-    return hours * 3600 + minutes * 60 + seconds
-
-
-def video_url(provider, target):
-    """把视频 ID 或网页链接换成嵌入播放器的地址，认不出时返回空字符串。"""
-    if provider == "youtube":
-        match = re.match(r"(?:https?://)?(?:www\.|m\.)?(?:youtube(?:-nocookie)?\.com/(?:watch\?(?:[^#]*&)?v=|embed/|shorts/|live/)|youtu\.be/)?"
-                         r"([A-Za-z0-9_-]{11})(?:[?&#](.*))?$", target)
-        if not match:
-            return ""
-        start = start_seconds((match.group(2) or "").replace("#", "&"))
-        # youtube-nocookie：不点播放就不设置跟踪 cookie
-        return f"https://www.youtube-nocookie.com/embed/{match.group(1)}" + (f"?start={start}" if start else "")
-    match = re.match(r"(?:https?://)?(?:www\.|m\.)?(?:bilibili\.com/video/)?(BV[A-Za-z0-9]{10})/?(?:\?(.*))?$", target)
-    if not match:
-        return ""
-    params = parse_qs(match.group(2) or "")
-    url = f"https://player.bilibili.com/player.html?bvid={match.group(1)}&autoplay=0"
-    page = (params.get("p") or ["1"])[0]
-    if page.isdigit() and page != "1":
-        url += f"&p={page}"
-    start = start_seconds(match.group(2) or "")
-    return url + (f"&t={start}" if start else "")
-
-
-def video_block(state, start, end, silent):
-    if state.sCount[start] - state.blkIndent >= 4:  # 缩进四格是代码块
-        return False
-    line = state.src[state.bMarks[start] + state.tShift[start]:state.eMarks[start]]
-    match = VIDEO_LINE.match(line)
-    if not match:
-        return False
-    provider = match.group(1).lower()
-    url = video_url(provider, match.group(2))
-    if not url:
-        return False  # 认不出的 ID 原样显示成文字，作者能看出写错了
-    if silent:
-        return True
-    token = state.push("video", "", 0)
-    token.map = [start, start + 1]
-    token.meta = {"url": url, "title": match.group(3) or VIDEO_TITLES[provider]}
-    state.line = start + 1
-    return True
-
-
-def render_video(self, tokens, idx, options, env):
-    meta = tokens[idx].meta
-    return (f'<div class="video"><iframe src="{e(meta["url"])}" title="{e(meta["title"])}" loading="lazy" '
-            'allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen '
-            'referrerpolicy="strict-origin-when-cross-origin"></iframe></div>\n')
-
-
-MD = (
-    MarkdownIt("commonmark", {"html": True, "highlight": highlight_code})
-    .enable(["table", "strikethrough"])
-    .use(dollarmath_plugin, allow_digits=False, double_inline=True, renderer=render_math)
-    .use(footnote_plugin)
-    .use(tasklists_plugin)
-    .use(anchors_plugin, max_level=4)
-)
-MD.core.ruler.push("strip_quote_markers", strip_quote_markers)
-MD.block.ruler.before("paragraph", "video", video_block, {"alt": ["paragraph"]})
-MD.add_render_rule("video", render_video)
+MD = make_markdown()
 
 
 def parse_frontmatter(source, path):

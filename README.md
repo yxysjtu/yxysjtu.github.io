@@ -158,6 +158,7 @@ visibility: private # 不发布这个页面，默认是 public
 
 ## 修改网站
 
+- Markdown 的渲染规则（换行即换段、视频、公式等）在 `md_render.py`，它和 Markdown 编辑器共用，原本在编辑器仓库里。本机构建时，`build.py` 会检查 `config.py` 的 `RENDERER_SOURCE` 指向的那份，改过了就复制过来并提醒你提交；GitHub 上构建时找不到编辑器，直接用仓库里的这份。所以要改渲染规则，改编辑器那份，再构建一次博客。不要直接改博客里的副本，下次构建会被覆盖
 - 网站标题、导航栏显示名、栏目视图：`config.py`
 - 样式和脚本：`_theme/`
 
