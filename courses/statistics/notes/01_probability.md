@@ -1,4 +1,9 @@
-# 1. Probability
+---
+date: 2026-11-05
+template: numbered
+---
+
+# 1. Probability {-}
 
 ## 各统计量
 * 概率密度
