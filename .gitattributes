@@ -1,3 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 *.sh text eol=lf
+# 渲染器是从编辑器逐字节复制来的，不要转换换行符，否则每次构建都会以为它变了
+_render/** -text
