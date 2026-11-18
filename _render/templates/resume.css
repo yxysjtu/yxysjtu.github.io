@@ -1,64 +1,81 @@
-/* 这里直接写 h1、p 这样的选择器，只影响文档内容，不影响编辑器界面。& 表示文档本身 */
+/* 简历模板，样子照 Typst 常见的 basic-resume：Libertinus 衬线字体，姓名和栏目标题用无衬线粗体，
+   栏目标题下面一条黑线；每段经历两行，第一行左边机构、右边日期，第二行左边职位、右边地点。
+   这里直接写 h1、p 这样的选择器，只影响文档内容，不影响编辑器界面。& 表示文档本身。字体在 fonts 文件夹，渲染时写进样式 */
+
+@font-face { font-family: "Resume Serif"; font-weight: 400; font-style: normal; src: url(./fonts/resume-serif-regular.woff2) format("woff2"); }
+@font-face { font-family: "Resume Serif"; font-weight: 700; font-style: normal; src: url(./fonts/resume-serif-bold.woff2) format("woff2"); }
+@font-face { font-family: "Resume Serif"; font-weight: 400; font-style: italic; src: url(./fonts/resume-serif-italic.woff2) format("woff2"); }
+@font-face { font-family: "Resume Serif"; font-weight: 700; font-style: italic; src: url(./fonts/resume-serif-bolditalic.woff2) format("woff2"); }
+@font-face { font-family: "Resume Sans"; font-weight: 700; font-style: normal; src: url(./fonts/resume-sans-bold.woff2) format("woff2"); }
+
 & {
-  color: #222;
-  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  color: #000;
+  font-family: var(--body-font), serif;
   font-size: var(--font-size);
-  line-height: 1.5;
+  line-height: 1.3;
 }
 
+/* 姓名和联系方式，联系方式在文档里写 ::: contact */
 h1 {
   margin: 0;
   color: var(--accent);
-  font-size: 24pt;
-  line-height: 1.3;
-  text-align: center;
+  font-family: var(--heading-font), sans-serif;
+  font-size: var(--name-size);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: var(--name-align);
 }
-
-/* 姓名下面的联系方式，文档里写 ::: contact */
 .contact {
-  margin: .2em 0 1em;
-  color: #555;
-  text-align: center;
+  margin: .15em 0 0;
+  text-align: var(--name-align);
 }
+.contact p { margin: 0; text-align: inherit; }
 
+/* 栏目标题：无衬线粗体，下面一条和版心一样宽的线 */
 h2 {
-  margin: 1.2em 0 .5em;
-  padding-bottom: 2pt;
-  border-bottom: 1px solid var(--accent);
+  margin: .9em 0 .45em;
+  padding-bottom: 1pt;
+  border-bottom: 1pt solid var(--accent);
   color: var(--accent);
-  font-size: 13pt;
+  font-family: var(--heading-font), sans-serif;
+  font-size: var(--section-size);
+  font-weight: 700;
+  line-height: 1.25;
 }
 
-/* 公司和日期分在左右两边，日期在文档里写 [2020 – 至今]{.date} */
+/* 一段经历的第一行：左边机构，右边日期。日期在文档里写 [2020 – 至今]{.date} */
 h3 {
   display: flex;
   justify-content: space-between;
   gap: 1em;
-  margin: .8em 0 .2em;
+  margin: .7em 0 0;
   font-size: 1em;
+  font-weight: 700;
+  line-height: 1.3;
 }
+h2 + h3 { margin-top: 0; }
+.date { flex: none; font-weight: 400; }
 
-.date {
-  flex: none;
-  color: #666;
-  font-weight: 400;
+/* 第二行：左边职位，右边地点。地点在文档里写 [上海]{.place} */
+p:has(> .place) {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
 }
+.place { flex: none; }
 
-p {
-  margin: .3em 0;
-}
+p { margin: 0; text-align: justify; }
+p + p { margin-top: .5em; }
+a { color: inherit; text-decoration: underline; text-decoration-thickness: .5pt; text-underline-offset: 2pt; }
+strong { font-weight: 700; }
 
-ul {
-  margin: .2em 0;
-  padding-left: 1.2em;
-}
-
-li {
-  margin: .1em 0;
-}
+/* 列表：第一层圆点，第二层三角，和原来的简历一样 */
+ul { margin: .1em 0 0; padding-left: 1.1em; list-style: none; }
+li { position: relative; margin: 0; text-align: justify; }
+li::before { content: "•"; position: absolute; left: -.85em; }
+li li::before { content: "‣"; }
+li > p { margin: 0; }
 
 @media print {
-  h2, h3 {
-    break-after: avoid;
-  }
+  h2, h3 { break-after: avoid; }
 }
